@@ -151,6 +151,7 @@ void zns_init_namespace(struct nvmev_ns *ns, uint32_t id, uint64_t size, void *m
 
 		/*register io command handler*/
 		.proc_io_cmd = zns_proc_nvme_io_cmd,
+		.proc_tr_cmd = zns_proc_nvme_tr_cmd,
 	};
 	return;
 }
@@ -185,6 +186,23 @@ static void zns_flush(struct nvmev_ns *ns, struct nvmev_request *req, struct nvm
 	ret->status = NVME_SC_SUCCESS;
 	ret->nsecs_target = latest;
 	return;
+}
+
+bool zns_proc_nvme_tr_cmd(struct nvmev_ns *ns, struct nvmev_tsu_tr* tr)
+{
+	struct zns_ftl *zns_ftl = (struct zns_ftl *)ns->ftls;
+	switch (tr->cmd) {
+		case NAND_WRITE:
+			if(!zns_write_tr(zns_ftl, tr))
+				return false;
+			break;
+		case NAND_READ:
+			if(!zns_read_tr(zns_ftl, tr))
+				return false;
+			break;
+		break;
+	}
+	return true;
 }
 
 bool zns_proc_nvme_io_cmd(struct nvmev_ns *ns, struct nvmev_request *req, struct nvmev_result *ret)

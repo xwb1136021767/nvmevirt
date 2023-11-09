@@ -8,7 +8,6 @@
 #include <asm/apic.h>
 
 #include "nvme.h"
-
 #define CONFIG_NVMEV_IO_WORKER_BY_SQ
 #undef CONFIG_NVMEV_FAST_X86_IRQ_HANDLING
 
@@ -17,6 +16,8 @@
 #undef CONFIG_NVMEV_DEBUG_VERBOSE
 
 /*************************/
+#define CONFIG_NVMEV_DEBUG
+#define CONFIG_NVMEV_DEBUG_VERBOSE
 #define NVMEV_DRV_NAME "NVMeVirt"
 #define NVMEV_VERSION 0x0110
 #define NVMEV_DEVICE_ID	NVMEV_VERSION
@@ -43,6 +44,7 @@
 
 #define NR_MAX_IO_QUEUE 72
 #define NR_MAX_PARALLEL_IO 16384
+#define NR_MAX_CHIP_IO 2048
 
 #define NVMEV_INTX_IRQ 15
 
@@ -139,6 +141,7 @@ struct nvmev_config {
 	unsigned long storage_size; // byte
 
 	unsigned int cpu_nr_dispatcher;
+	unsigned int cpu_nr_tsu;
 	unsigned int nr_io_workers;
 	unsigned int cpu_nr_io_workers[32];
 
@@ -183,6 +186,81 @@ struct nvmev_io_work {
 	unsigned int next, prev;
 };
 
+
+
+struct nvmev_transaction {
+	uint32_t nsid;
+	uint64_t lpn;
+	uint64_t nr_lba;
+	uint64_t pgs;
+	uint64_t zone_elpn;
+	struct buffer *write_buffer;
+	uint64_t nsecs_start;
+	uint64_t nsecs_target;
+	struct nand_cmd* swr;
+	
+	struct list_head list;
+};
+
+struct nvmev_tsu_tr {
+	uint32_t nsid;
+	int sqid;
+	uint64_t lpn;
+	uint64_t nr_lba;
+	uint64_t pgs;
+	uint64_t zone_elpn;
+	struct buffer *write_buffer;
+
+	int type;
+	int cmd;
+	uint64_t xfer_size; // byte
+	uint64_t stime; /* Coperd: request arrival time */
+	bool interleave_pci_dma;
+	volatile bool  is_completed;
+	volatile bool is_reclaim_by_ret;
+	struct ppa *ppa;
+	
+	uint64_t nsecs_target;
+	unsigned int next, prev;
+	struct list_head list;
+};
+
+struct nvmev_transaction_queue {
+	struct nvmev_tsu_tr* queue;
+
+	unsigned int free_seq; /* free io req head index */
+	unsigned int free_seq_end; /* free io req tail index */
+	unsigned int io_seq; /* io req head index */
+	unsigned int io_seq_end; /* io req tail index */
+};
+
+struct nvmev_result_tsu {
+	int sqid;
+	int cqid;
+	int sq_entry;
+	uint32_t status;
+	uint64_t nsecs_start;
+	uint64_t nsecs_target;
+
+
+	struct list_head transactions;
+	struct list_head list;
+};
+
+struct nvmev_tsu {
+	struct nvmev_transaction_queue** chip_queue; /*chip queue*/
+	struct list_head ret_queue;
+	
+	unsigned long long latest_nsecs;
+	unsigned int id;
+	int nchs;
+	int dies_per_ch;
+	struct task_struct *task_struct;
+	char thread_name[32];
+
+	void (*schedule)(struct nvmev_tsu* tsu);
+};
+
 struct nvmev_io_worker {
 	struct nvmev_io_work *work_queue;
 
@@ -211,6 +289,9 @@ struct nvmev_dev {
 
 	struct nvmev_config config;
 	struct task_struct *nvmev_dispatcher;
+
+	// TSU-- schedule transactions for chip queue
+	struct nvmev_tsu *nvmev_tsu;
 
 	void *storage_mapped;
 
@@ -257,6 +338,8 @@ struct nvmev_request {
 struct nvmev_result {
 	uint32_t status;
 	uint64_t nsecs_target;
+	
+	struct list_head transactions;
 };
 
 struct nvmev_ns {
@@ -278,6 +361,8 @@ struct nvmev_ns {
 	/*specific CSS io command processor*/
 	unsigned int (*perform_io_cmd)(struct nvmev_ns *ns, struct nvme_command *cmd,
 				       uint32_t *status);
+
+	bool (*proc_tr_cmd)(struct nvmev_ns *ns, struct nvmev_tsu_tr* tr);
 };
 
 // VDEV Init, Final Function
@@ -300,4 +385,7 @@ void NVMEV_IO_WORKER_FINAL(struct nvmev_dev *nvmev_vdev);
 int nvmev_proc_io_sq(int qid, int new_db, int old_db);
 void nvmev_proc_io_cq(int qid, int new_db, int old_db);
 
+// TSU 
+void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev);
+void NVMEV_TSU_FINAL(struct nvmev_dev *nvmev_vdev);
 #endif /* _LIB_NVMEV_H */

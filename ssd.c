@@ -416,6 +416,7 @@ uint64_t ssd_advance_nand(struct ssd *ssd, struct nand_cmd *ncmd)
 		break;
 
 	case NAND_WRITE:
+		NVMEV_DEBUG("BIN: ssd_advance_nand NAND_WRITE\n");
 		/* write: transfer data through channel first */
 		chnl_stime = max(lun->next_lun_avail_time, cmd_stime);
 

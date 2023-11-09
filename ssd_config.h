@@ -184,7 +184,7 @@ static_assert((ZONE_SIZE % DIES_PER_ZONE) == 0);
 /*In an emulator environment, it may be too large to run an application
   which requires a certain number of zones or more.
   So, adjust the zone size to fit your environment */
-#define ZONE_SIZE GB(2ULL)
+#define ZONE_SIZE MB(64ULL)
 
 static_assert((ONESHOT_PAGE_SIZE % FLASH_PAGE_SIZE) == 0);
 

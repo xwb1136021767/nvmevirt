@@ -7,7 +7,8 @@
 
 #include "nvmev.h"
 #include "dma.h"
-
+#include "ssd_config.h"
+#include "tsu_fifo.h"
 #if (SUPPORTED_SSD_TYPE(CONV) || SUPPORTED_SSD_TYPE(ZNS))
 #include "ssd.h"
 #else
@@ -267,6 +268,114 @@ static struct nvmev_io_worker *__allocate_work_queue_entry(int sqid, unsigned in
 	return worker;
 }
 
+
+struct nvmev_transaction_queue* __allocate_tr_queue_entry(uint64_t ch, uint64_t lun, unsigned int *entry){
+	struct nvmev_transaction_queue *chip_queue = &nvmev_vdev->nvmev_tsu->chip_queue[ch][lun];
+	unsigned int e = chip_queue->free_seq;
+	struct nvmev_tsu_tr *tr = chip_queue->queue + e;
+
+	NVMEV_DEBUG("BIN:  allocate entry(%u) from chip(ch: %lld, lun: %lld), its io_seq=%lld, io_seq_end=%lld, free_seq=%lld, free_seq_end=%lld\n", 
+			e, ch, lun, chip_queue->io_seq, chip_queue->io_seq_end, chip_queue->free_seq, chip_queue->free_seq_end);
+	NVMEV_DEBUG("BIN:  tr->next = %u  tr->cmd = %d\n", tr->next, tr->cmd);
+	if (tr->next >= NR_MAX_CHIP_IO) {
+		WARN_ON_ONCE("Chip queue is almost full");
+		return NULL;
+	}
+
+	chip_queue->free_seq = tr->next;
+	BUG_ON(chip_queue->free_seq >= NR_MAX_CHIP_IO);
+	*entry = e;
+	return chip_queue;
+}
+
+static void __insert_tr_to_chip_queue(unsigned int entry, struct nvmev_transaction_queue *chip_queue)
+{
+	if(chip_queue->io_seq == -1){
+		chip_queue->io_seq = entry;
+		chip_queue->io_seq_end = entry;
+	}else{
+		unsigned int curr = chip_queue->io_seq_end;
+		if(curr == -1){
+			return;
+		}
+		chip_queue->queue[entry].prev = curr;
+		chip_queue->io_seq_end = entry;
+		chip_queue->queue[curr].next = entry;
+	}
+}
+
+static void __insert_ret_to_tsu(struct nvmev_result_tsu* tsu_ret)
+{
+	INIT_LIST_HEAD(&tsu_ret->list);
+	list_add_tail(&tsu_ret->list, &nvmev_vdev->nvmev_tsu->ret_queue);
+}
+
+static void __enqueue_trs_to_tsu(uint32_t nsid, int sqid, int cqid, int sq_entry, unsigned long long nsecs_start,
+			     struct nvmev_result *ret)
+{
+	unsigned int e;
+	struct nvmev_transaction_queue* chip_queue;
+	struct nvmev_tsu_tr* tr;
+	struct nvmev_transaction *entry;
+	struct nvmev_result_tsu *tsu_ret = kmalloc(sizeof(struct nvmev_result_tsu), GFP_KERNEL);
+	*(tsu_ret) = (struct nvmev_result_tsu){
+		.sqid = sqid,
+		.cqid = cqid,
+		.sq_entry = sq_entry,
+		.nsecs_start = nsecs_start,
+		.nsecs_target = ret->nsecs_target,
+		.status = ret->status,
+		.transactions = LIST_HEAD_INIT(tsu_ret->transactions),
+	};
+
+	list_for_each_entry(entry, &ret->transactions, list) {
+		uint64_t ch = entry->swr->ppa->g.ch;
+		uint64_t lun = entry->swr->ppa->g.lun;
+		chip_queue = __allocate_tr_queue_entry(ch, lun, &e);
+		if(!chip_queue)
+			return;
+
+		/* dispatch transactions to chip queue*/
+		tr = chip_queue->queue + e;
+		tr->nsid = entry->nsid;
+		tr->sqid = sqid;
+		tr->lpn =  entry->lpn;
+		tr->nr_lba = entry->nr_lba;
+		tr->pgs = entry->pgs;
+		tr->zone_elpn = entry->zone_elpn;
+		tr->write_buffer = entry->write_buffer;
+
+		tr->type = entry->swr->type;
+		tr->cmd = entry->swr->cmd;
+		tr->xfer_size = entry->swr->xfer_size;
+		tr->stime = entry->swr->stime;
+		tr->interleave_pci_dma = entry->swr->interleave_pci_dma;
+		tr->is_completed = false;
+		tr->is_reclaim_by_ret = false;
+		tr->nsecs_target = entry->swr->stime;
+		tr->ppa = kmalloc(sizeof(struct ppa), GFP_KERNEL);
+		*(tr->ppa) = *(entry->swr->ppa);
+		tr->prev = -1;
+		tr->next = -1;
+
+
+		/* Add tr to tsu_ret's transaction list, so that TSU can calculate resquest's response time. */
+		INIT_LIST_HEAD(&tr->list);
+		list_add_tail(&tr->list, &tsu_ret->transactions);
+
+		NVMEV_DEBUG("BIN:  insert tr(sqid: %d, lpn: %lld) to ret(sqid: %d, sq_entry: %d)\n",
+				tr->sqid, entry->lpn, tsu_ret->sqid, tsu_ret->sq_entry);
+
+		mb(); /* TSU worker shall see the updated tr at once */
+
+		NVMEV_DEBUG("BIN:  insert tr to chip-queue, ch: %lld lun: %lld entry: %u\n", ch, lun, e);
+		__insert_tr_to_chip_queue(e, chip_queue);
+	}
+
+	NVMEV_DEBUG("BIN:  insert ret to tsu, sqid: %lld  entry: %u\n", sqid, sq_entry);
+	__insert_ret_to_tsu(tsu_ret);
+}
+
 static void __enqueue_io_req(int sqid, int cqid, int sq_entry, unsigned long long nsecs_start,
 			     struct nvmev_result *ret)
 {
@@ -317,7 +426,6 @@ void schedule_internal_operation(int sqid, unsigned long long nsecs_target,
 		return;
 
 	w = worker->work_queue + entry;
-
 	NVMEV_DEBUG_VERBOSE("%s/%u, internal sq %d, %llu + %llu\n", worker->thread_name, entry, sqid,
 		    local_clock(), nsecs_target - local_clock());
 
@@ -336,6 +444,114 @@ void schedule_internal_operation(int sqid, unsigned long long nsecs_target,
 	mb(); /* IO worker shall see the updated w at once */
 
 	__insert_req_sorted(entry, worker, nsecs_target);
+}
+
+
+/*
+	Reclaim completed result from tsu
+*/
+static void __reclaim_completed_ret_in_tsu(void)
+{
+	// NVMEV_DEBUG("BIN:  zns other command, __reclaim_completed_ret_in_tsu");
+	struct nvmev_result_tsu *ret_entry, *tmp;
+	list_for_each_entry_safe(ret_entry, tmp, &nvmev_vdev->nvmev_tsu->ret_queue, list) {
+		struct nvmev_tsu_tr *tr_entry;
+		bool all_tr_completed = true;
+		// NVMEV_DEBUG("BIN:  reclaim ret from tsu,  ret : sqid: %d cqid: %d sq_entry: %d\n", 
+						// ret_entry->sqid, ret_entry->cqid, ret_entry->sq_entry);
+
+		list_for_each_entry(tr_entry, &ret_entry->transactions, list) {
+			if(tr_entry->is_completed == true && tr_entry->is_reclaim_by_ret == false){
+				ret_entry->nsecs_target = max(ret_entry->nsecs_target, tr_entry->nsecs_target);
+				tr_entry->is_reclaim_by_ret = true;
+				// NVMEV_DEBUG("BIN:  true, false,  tr(lpn: %lld)\n", tr_entry->lpn);
+			}else{
+				if((tr_entry->is_completed == true && tr_entry->is_reclaim_by_ret == false)
+					|| (tr_entry->is_completed == false && tr_entry->is_reclaim_by_ret == false))
+				{
+					all_tr_completed = false;
+				}
+				// if(tr_entry->is_completed == true && tr_entry->is_reclaim_by_ret == true)
+				// 	NVMEV_DEBUG("BIN:  true, true\n");
+				// if(tr_entry->is_completed == false && tr_entry->is_reclaim_by_ret == false)
+				// 	NVMEV_DEBUG("BIN:  false, false\n");
+				// if(tr_entry->is_completed == false && tr_entry->is_reclaim_by_ret == true)
+				// 	NVMEV_DEBUG("BIN:  false, true\n");
+			}
+		}
+
+		/*If all transactions completed, remove ret from ret_queue*/
+		if(all_tr_completed == true){
+			struct nvmev_result ret = {
+				.nsecs_target = ret_entry->nsecs_target,
+				.status = ret_entry->status,
+				.transactions = LIST_HEAD_INIT(ret.transactions),
+			};
+			__enqueue_io_req(ret_entry->sqid, ret_entry->cqid, ret_entry->sq_entry, ret_entry->nsecs_start, &ret);
+
+			// Delete from ret_queue
+			list_del(&ret_entry->list);
+
+			NVMEV_DEBUG("BIN:  delete ret from ret_queue, sqid: %d cqid: %d sq_entry: %d\n", 
+					ret_entry->sqid, ret_entry->cqid, ret_entry->sq_entry);
+		}
+	}
+}
+
+/*
+	Reclaim completed transactions from chip queue
+*/
+static void __reclaim_completed_transactions(void)
+{
+	// xNVMEV_DEBUG("BIN:  zns append and write command, __reclaim_completed_transactions");
+	struct nvmev_transaction_queue* chip_queue;
+	struct nvmev_tsu_tr* tr;
+	int nchs = nvmev_vdev->nvmev_tsu->nchs;
+	int dies_per_ch = nvmev_vdev->nvmev_tsu->dies_per_ch;
+	unsigned int i, j;
+	for(i=0;i<nchs;i++){
+		for(j=0;j<dies_per_ch;j++){
+			unsigned int first_entry = -1;
+			unsigned int last_entry = -1;
+			unsigned int curr;
+			int nr_reclaimed = 0;
+			chip_queue = &nvmev_vdev->nvmev_tsu->chip_queue[i][j];
+			
+			first_entry = chip_queue->io_seq;
+			curr = first_entry;
+			while( curr != -1 ){
+				tr = &chip_queue->queue[curr];
+				if(tr->is_completed == true && tr->is_reclaim_by_ret == true){
+					NVMEV_DEBUG("BIN:  reclaim tr from ch: %d  lun: %d curr = %u lpn = %lld, is_completed: %d is_reclaim_by_ret: %d\n", 
+						i, j, curr, tr->lpn, tr->is_completed, tr->is_reclaim_by_ret);
+					last_entry = curr;
+					curr = tr->next;
+					nr_reclaimed++;
+				} else{
+					break;
+				}
+			}
+
+			if (last_entry != -1) {
+				tr = &chip_queue->queue[last_entry];
+				chip_queue->io_seq = tr->next;
+				if (tr->next != -1) {
+					chip_queue->queue[tr->next].prev = -1;
+				}
+				tr->next = -1;
+
+				tr = &chip_queue->queue[first_entry];
+				tr->prev = chip_queue->free_seq_end;
+
+				tr = &chip_queue->queue[chip_queue->free_seq_end];
+				tr->next = first_entry;
+
+				chip_queue->free_seq_end = last_entry;
+				NVMEV_DEBUG("%s: recliam from chip_queue in channel-%d die-%d %u -- %u, %d\n", __func__,
+						i, j, first_entry, last_entry, nr_reclaimed);
+			}
+		}
+	}
 }
 
 static void __reclaim_completed_reqs(void)
@@ -409,6 +625,7 @@ static size_t __nvmev_proc_io(int sqid, int sq_entry, size_t *io_size)
 	struct nvmev_result ret = {
 		.nsecs_target = nsecs_start,
 		.status = NVME_SC_SUCCESS,
+		.transactions = LIST_HEAD_INIT(ret.transactions),
 	};
 
 #ifdef PERF_DEBUG
@@ -426,11 +643,32 @@ static size_t __nvmev_proc_io(int sqid, int sq_entry, size_t *io_size)
 		return false;
 	*io_size = (cmd->rw.length + 1) << 9;
 
+	
 #ifdef PERF_DEBUG
 	prev_clock2 = local_clock();
 #endif
-
-	__enqueue_io_req(sqid, sq->cqid, sq_entry, nsecs_start, &ret);
+	NVMEV_DEBUG("sq_entry %d, nsecs_start %lld nsecs_target %lld\n", sq_entry, nsecs_start, ret.nsecs_target);
+	
+	switch(cmd->common.opcode){
+		case nvme_cmd_read:
+		case nvme_cmd_write:
+		case nvme_cmd_zone_append:
+			NVMEV_DEBUG("BIN:  zns append and write command, __enqueue_trs_to_tsu");
+			__enqueue_trs_to_tsu(nsid, sqid, sq->cqid, sq_entry, nsecs_start, &ret);
+			break;
+		case nvme_cmd_flush:
+		case nvme_cmd_zone_mgmt_send:
+		case nvme_cmd_zone_mgmt_recv:
+			NVMEV_DEBUG("BIN:  zns other command, __enqueue_io_req");
+			__enqueue_io_req(sqid, sq->cqid, sq_entry, nsecs_start, &ret);
+			break;
+		default:
+			NVMEV_ERROR("%s: unimplemented command: %s(%d)\n", __func__,
+					nvme_opcode_string(cmd->common.opcode), cmd->common.opcode);
+			break;
+	}
+	// __enqueue_trs_to_tsu(nsid, sqid, sq->cqid, sq_entry, nsecs_start, &ret);
+	// __enqueue_io_req(sqid, sq->cqid, sq_entry, nsecs_start, &ret);
 
 #ifdef PERF_DEBUG
 	prev_clock3 = local_clock();
@@ -613,10 +851,12 @@ static int nvmev_io_worker(void *data)
 			if (w->nsecs_target <= curr_nsecs) {
 				if (w->is_internal) {
 #if (SUPPORTED_SSD_TYPE(CONV) || SUPPORTED_SSD_TYPE(ZNS))
+					NVMEV_DEBUG("inernal buffer_release, %d %d %d\n",  w->sqid, w->cqid, w->sq_entry);
 					buffer_release((struct buffer *)w->write_buffer,
 						       w->buffs_to_release);
 #endif
 				} else {
+					NVMEV_DEBUG("__fill_cq_result %d %d %d\n", w->sqid, w->cqid, w->sq_entry);
 					__fill_cq_result(w);
 				}
 
@@ -726,4 +966,85 @@ void NVMEV_IO_WORKER_FINAL(struct nvmev_dev *nvmev_vdev)
 	}
 
 	kfree(nvmev_vdev->io_workers);
+}
+
+static int nvmev_tsu(void *data){
+	struct nvmev_tsu *tsu=(struct nvmev_tsu *)data;
+	int nchs = NAND_CHANNELS;
+    int dies_per_ch = LUNS_PER_NAND_CH;
+
+	NVMEV_INFO("nvmev_tsu started on cpu %d (node %d)\n",
+		   nvmev_vdev->config.cpu_nr_tsu,
+		   cpu_to_node(nvmev_vdev->config.cpu_nr_tsu));
+	
+	while (!kthread_should_stop()) {
+		tsu->schedule(tsu);
+
+		// NVMEV_DEBUG("BIN:  zns append and write command, __reclaim_completed_transactions");
+		__reclaim_completed_transactions();
+		// NVMEV_DEBUG("BIN:  zns append and write command, __reclaim_completed_ret_in_tsu");
+		__reclaim_completed_ret_in_tsu();
+
+		cond_resched();
+	}
+
+	return 0;
+};
+
+void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
+    int nchs = NAND_CHANNELS;
+    int dies_per_ch = LUNS_PER_NAND_CH;
+	unsigned int i, j, k;
+
+	nvmev_vdev->nvmev_tsu = kcalloc(sizeof(struct nvmev_tsu), 1, GFP_KERNEL);
+	*(nvmev_vdev->nvmev_tsu) = (struct nvmev_tsu){
+		.nchs = nchs,
+		.dies_per_ch = dies_per_ch,
+		.ret_queue = LIST_HEAD_INIT(nvmev_vdev->nvmev_tsu->ret_queue),
+	};
+	
+	nvmev_vdev->nvmev_tsu->chip_queue = kzalloc(sizeof(struct nvmev_transaction_queue*) * nchs, GFP_KERNEL);
+	for(i=0;i<nchs;i++){
+		
+		nvmev_vdev->nvmev_tsu->chip_queue[i] = 
+			kzalloc(sizeof(struct nvmev_transaction_queue) * dies_per_ch, GFP_KERNEL);	
+		for(j=0;j<dies_per_ch;j++){
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue = kzalloc(sizeof(struct nvmev_transaction) * NR_MAX_CHIP_IO, GFP_KERNEL);
+			for(k=0;k<NR_MAX_CHIP_IO;k++){
+				nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue[k].next = k+1;
+				nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue[k].prev = k-1;
+			}
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue[NR_MAX_CHIP_IO-1].next = -1;
+
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].free_seq = 0;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].free_seq_end = NR_MAX_CHIP_IO-1;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].io_seq = -1;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].io_seq_end = -1;
+		}
+	}
+
+	nvmev_vdev->nvmev_tsu->schedule = schedule_fifo;
+	nvmev_vdev->nvmev_tsu->task_struct = kthread_create(nvmev_tsu, nvmev_vdev->nvmev_tsu, "nvmev_tsu");
+	if (nvmev_vdev->config.cpu_nr_dispatcher != -1)
+		kthread_bind(nvmev_vdev->nvmev_tsu->task_struct, nvmev_vdev->config.cpu_nr_tsu);
+	wake_up_process(nvmev_vdev->nvmev_tsu->task_struct);
+}
+
+void NVMEV_TSU_FINAL(struct nvmev_dev *nvmev_vdev){
+	unsigned int i,j;
+	int nchs = NAND_CHANNELS;
+    int dies_per_ch = LUNS_PER_NAND_CH;
+
+	for(i=0;i<nchs;i++){
+		for(j=0;j<dies_per_ch;j++){
+			kfree(nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue);
+		}
+		kfree(nvmev_vdev->nvmev_tsu->chip_queue[i]);
+	}
+	kfree(nvmev_vdev->nvmev_tsu->chip_queue);
+
+	if (!IS_ERR_OR_NULL(nvmev_vdev->nvmev_tsu)) {
+		kthread_stop(nvmev_vdev->nvmev_tsu->task_struct);
+	}
+	kfree(nvmev_vdev->nvmev_tsu);
 }

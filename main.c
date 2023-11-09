@@ -454,7 +454,7 @@ void NVMEV_STORAGE_FINAL(struct nvmev_dev *nvmev_vdev)
 
 static bool __load_configs(struct nvmev_config *config)
 {
-	bool first = true;
+	bool first = true, second = true;
 	unsigned int cpu_nr;
 	char *cpu;
 
@@ -483,18 +483,23 @@ static bool __load_configs(struct nvmev_config *config)
 
 	config->nr_io_workers = 0;
 	config->cpu_nr_dispatcher = -1;
+	config->cpu_nr_tsu = -1;
 
 	while ((cpu = strsep(&cpus, ",")) != NULL) {
 		cpu_nr = (unsigned int)simple_strtol(cpu, NULL, 10);
 		if (first) {
 			config->cpu_nr_dispatcher = cpu_nr;
+			first = false;
+		} else if (second) {
+			config->cpu_nr_tsu = cpu_nr;
+			second = false;
 		} else {
+			NVMEV_DEBUG("cpu_nr_io_workers=%d\n", cpu_nr);
 			config->cpu_nr_io_workers[config->nr_io_workers] = cpu_nr;
 			config->nr_io_workers++;
 		}
-		first = false;
 	}
-
+	NVMEV_DEBUG("cpu_nr_dispatcher=%d cpu_nr_tsu=%d\n", config->cpu_nr_dispatcher, config->cpu_nr_tsu);
 	return true;
 }
 
@@ -617,6 +622,7 @@ static int NVMeV_init(void)
 
 	NVMEV_IO_WORKER_INIT(nvmev_vdev);
 	NVMEV_DISPATCHER_INIT(nvmev_vdev);
+	NVMEV_TSU_INIT(nvmev_vdev);
 
 	pci_bus_add_devices(nvmev_vdev->virt_bus);
 
@@ -640,7 +646,7 @@ static void NVMeV_exit(void)
 
 	NVMEV_DISPATCHER_FINAL(nvmev_vdev);
 	NVMEV_IO_WORKER_FINAL(nvmev_vdev);
-
+	NVMEV_TSU_FINAL(nvmev_vdev);
 	NVMEV_NAMESPACE_FINAL(nvmev_vdev);
 	NVMEV_STORAGE_FINAL(nvmev_vdev);
 
