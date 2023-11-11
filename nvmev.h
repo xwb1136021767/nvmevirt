@@ -17,7 +17,7 @@
 
 /*************************/
 #define CONFIG_NVMEV_DEBUG
-#define CONFIG_NVMEV_DEBUG_VERBOSE
+// #define CONFIG_NVMEV_DEBUG_VERBOSE
 #define NVMEV_DRV_NAME "NVMeVirt"
 #define NVMEV_VERSION 0x0110
 #define NVMEV_DEVICE_ID	NVMEV_VERSION
@@ -190,6 +190,7 @@ struct nvmev_io_work {
 
 struct nvmev_transaction {
 	uint32_t nsid;
+	uint32_t zid;
 	uint64_t lpn;
 	uint64_t nr_lba;
 	uint64_t pgs;
@@ -204,6 +205,7 @@ struct nvmev_transaction {
 
 struct nvmev_tsu_tr {
 	uint32_t nsid;
+	uint32_t zid;
 	int sqid;
 	uint64_t lpn;
 	uint64_t nr_lba;
@@ -219,19 +221,21 @@ struct nvmev_tsu_tr {
 	volatile bool  is_completed;
 	volatile bool is_reclaim_by_ret;
 	struct ppa *ppa;
-	
 	uint64_t nsecs_target;
 	unsigned int next, prev;
+
 	struct list_head list;
 };
 
 struct nvmev_transaction_queue {
 	struct nvmev_tsu_tr* queue;
 
+	spinlock_t tr_lock;
 	unsigned int free_seq; /* free io req head index */
 	unsigned int free_seq_end; /* free io req tail index */
 	unsigned int io_seq; /* io req head index */
 	unsigned int io_seq_end; /* io req tail index */
+	unsigned int nr_trs_in_fly;
 };
 
 struct nvmev_result_tsu {
@@ -242,7 +246,6 @@ struct nvmev_result_tsu {
 	uint64_t nsecs_start;
 	uint64_t nsecs_target;
 
-
 	struct list_head transactions;
 	struct list_head list;
 };
@@ -250,7 +253,8 @@ struct nvmev_result_tsu {
 struct nvmev_tsu {
 	struct nvmev_transaction_queue** chip_queue; /*chip queue*/
 	struct list_head ret_queue;
-	
+	spinlock_t ret_lock;
+
 	unsigned long long latest_nsecs;
 	unsigned int id;
 	int nchs;
@@ -264,6 +268,7 @@ struct nvmev_tsu {
 struct nvmev_io_worker {
 	struct nvmev_io_work *work_queue;
 
+	spinlock_t entry_lock;
 	unsigned int free_seq; /* free io req head index */
 	unsigned int free_seq_end; /* free io req tail index */
 	unsigned int io_seq; /* io req head index */

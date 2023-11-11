@@ -156,7 +156,7 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 	elpn = lba_to_lpn(zns_ftl, slba + nr_lba - 1);
 	zone_elpn = zone_to_elpn(zns_ftl, zid);
 
-	NVMEV_ZNS_DEBUG("%s slba 0x%llx nr_lba 0x%lx zone_id %d state %d\n", __func__, slba,
+	NVMEV_DEBUG("%s slba 0x%llx nr_lba 0x%lx zone_id %d state %d\n", __func__, slba,
 			nr_lba, zid, state);
 
 	if (zns_ftl->zp.zone_wb_size)
@@ -246,6 +246,7 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 		/* Aggregate write io in flash page */
 		if (((pg_off + pgs) == spp->pgs_per_oneshotpg) || ((lpn + pgs - 1) == zone_elpn)) {
 			struct nvmev_transaction *tr = kmalloc(sizeof(struct nvmev_transaction), GFP_KERNEL);
+			tr->zid = zid;
 			tr->lpn = lpn;
 			tr->pgs = pgs;
 			tr->zone_elpn = zone_elpn;
@@ -475,7 +476,7 @@ bool zns_write(struct nvmev_ns *ns, struct nvmev_request *req, struct nvmev_resu
 	// get zone from start_lba
 	uint32_t zid = lpn_to_zone(zns_ftl, slpn);
 
-	NVMEV_DEBUG("%s slba 0x%llx zone_id %d \n", __func__, cmd->slba, zid);
+	// NVMEV_DEBUG("%s slba 0x%llx zone_id %d \n", __func__, cmd->slba, zid);
 
 	if (zone_descs[zid].zrwav == 0)
 		return __zns_write(zns_ftl, req, ret);
@@ -506,7 +507,7 @@ bool zns_read(struct nvmev_ns *ns, struct nvmev_request *req, struct nvmev_resul
 	struct ppa ppa;
 	// struct nand_cmd swr;
 
-	NVMEV_ZNS_DEBUG(
+	NVMEV_DEBUG(
 		"%s slba 0x%llx nr_lba 0x%lx zone_id %d state %d wp 0x%llx last lba 0x%llx\n",
 		__func__, slba, nr_lba, zid, zone_descs[zid].state, zone_descs[zid].wp,
 		(slba + nr_lba - 1));
@@ -540,6 +541,7 @@ bool zns_read(struct nvmev_ns *ns, struct nvmev_request *req, struct nvmev_resul
 		// nsecs_latest = (nsecs_completed > nsecs_latest) ? nsecs_completed : nsecs_latest;
 
 		struct nvmev_transaction *tr = kmalloc(sizeof(struct nvmev_transaction), GFP_KERNEL);
+		tr->zid = zid;
 		tr->lpn = lpn;
 		tr->pgs = pgs;
 		if(lpn == elpn) tr->nr_lba = nr_lba;
@@ -559,6 +561,8 @@ bool zns_read(struct nvmev_ns *ns, struct nvmev_request *req, struct nvmev_resul
 		INIT_LIST_HEAD(&tr->list);
 		list_add_tail(&tr->list, &ret->transactions);
 	}
+
+	NVMEV_DEBUG("BIN:  split tr completed\n");
 
 	// if (swr.interleave_pci_dma == false) {
 	// 	nsecs_completed = ssd_advance_pcie(zns_ftl->ssd, nsecs_latest, nr_lba * spp->secsz);
