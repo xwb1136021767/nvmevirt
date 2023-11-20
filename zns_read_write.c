@@ -164,6 +164,7 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 	else
 		write_buffer = zns_ftl->ssd->write_buffer;
 
+	NVMEV_DEBUG("buffer_allocate\n");
 	if (buffer_allocate(write_buffer, LBA_TO_BYTE(nr_lba)) < LBA_TO_BYTE(nr_lba))
 		return false;
 
@@ -172,6 +173,7 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 		goto out;
 	}
 
+	NVMEV_DEBUG("__check_boundary_error\n");
 	if (__check_boundary_error(zns_ftl, slba, nr_lba) == false) {
 		// return boundary error
 		status = NVME_SC_ZNS_ERR_BOUNDARY;
@@ -186,6 +188,7 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 		goto out;
 	}
 
+	NVMEV_DEBUG("state machine\n");
 	switch (state) {
 	case ZONE_STATE_EMPTY: {
 		// check if slba == start lba in zone
@@ -228,11 +231,13 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 		goto out;
 	}
 
+	NVMEV_DEBUG("__increase_write_ptr\n");
 	__increase_write_ptr(zns_ftl, zid, nr_lba);
 
+	NVMEV_DEBUG("ssd_advance_write_buffer\n");
 	// get delay from nand model
 	nsecs_latest = nsecs_start;
-	nsecs_latest = ssd_advance_write_buffer(zns_ftl->ssd, nsecs_latest, LBA_TO_BYTE(nr_lba));
+	// nsecs_latest = ssd_advance_write_buffer(zns_ftl->ssd, nsecs_latest, LBA_TO_BYTE(nr_lba));
 	nsecs_xfer_completed = nsecs_latest;
 
 	for (lpn = slpn; lpn <= elpn; lpn += pgs) {
@@ -267,6 +272,8 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 			INIT_LIST_HEAD(&tr->list);
 			list_add_tail(&tr->list, &ret->transactions);
 			
+			NVMEV_DEBUG("Split req(slba 0x%llx nr_lba 0x%llx  zid %d) to tr (zid: %u lpn: %lld)\n",
+						slba, nr_lba, zid, zid, lpn);
 			// struct nand_cmd swr = {
 			// 	.type = USER_IO,
 			// 	.cmd = NAND_WRITE,
@@ -294,6 +301,8 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 			// 			    bufs_to_release);
 		}
 	}
+
+	NVMEV_DEBUG("Split req completed\n");
 out:
 	ret->status = status;
 	if ((cmd->control & NVME_RW_FUA) ||

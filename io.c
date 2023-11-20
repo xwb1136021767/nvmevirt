@@ -380,7 +380,6 @@ static void __enqueue_trs_to_tsu(uint32_t nsid, int sqid, int cqid, int sq_entry
 		__insert_tr_to_chip_queue(e, chip_queue);
 	}
 
-	NVMEV_DEBUG("BIN:  insert ret to tsu, sqid: %lld  entry: %u\n", sqid, sq_entry);
 	__insert_ret_to_tsu(tsu_ret);
 }
 
@@ -524,8 +523,6 @@ static void __reclaim_completed_transactions(void)
 			while( curr != -1 ){
 				tr = &chip_queue->queue[curr];
 				if(tr->is_completed == true && tr->is_reclaim_by_ret == true){
-					NVMEV_DEBUG("BIN:  reclaim tr from ch: %d  lun: %d curr = %u lpn = %lld, is_completed: %d is_reclaim_by_ret: %d\n", 
-						i, j, curr, tr->lpn, tr->is_completed, tr->is_reclaim_by_ret);
 					last_entry = curr;
 					curr = tr->next;
 					nr_reclaimed++;
