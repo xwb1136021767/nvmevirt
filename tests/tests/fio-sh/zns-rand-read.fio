@@ -1,0 +1,14 @@
+[global]
+ioengine=psync
+direct=1
+filename=/dev/nvme0n1
+rw=randread
+bs=256k
+group_reporting
+zonemode=zbd
+
+[randread]
+offset_increment=1z
+size=30z
+numjobs=10
+max_open_zones=10

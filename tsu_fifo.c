@@ -16,7 +16,7 @@ void schedule_fifo(struct nvmev_tsu* tsu){
                     continue;
                 }
 
-                NVMEV_DEBUG("BIN:  process tr from ch: %d lun: %d zid: %lld, curr = %lld ,io_seq=%lld, io_seq_end=%lld\n", 
+                NVMEV_DEBUG("BIN:  process tr from ch: %d lun: %d zid: %d, curr = %d ,io_seq=%d, io_seq_end=%d\n", 
                         i, j, tr->zid, curr, chip_queue->io_seq, chip_queue->io_seq_end);
                 if (!ns->proc_tr_cmd(ns, tr)){
                     return;

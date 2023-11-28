@@ -278,7 +278,7 @@ struct nvmev_transaction_queue* __allocate_tr_queue_entry(uint64_t ch, uint64_t 
 	unsigned int e = chip_queue->free_seq;
 	struct nvmev_tsu_tr *tr = chip_queue->queue + e;
 
-	NVMEV_DEBUG("BIN:  allocate entry(%u) from chip(ch: %lld, lun: %lld), its io_seq=%lld, io_seq_end=%lld, free_seq=%lld, free_seq_end=%lld\n", 
+	NVMEV_DEBUG("BIN:  allocate entry(%u) from chip(ch: %lld, lun: %lld), its io_seq=%d, io_seq_end=%d, free_seq=%d, free_seq_end=%d\n", 
 			e, ch, lun, chip_queue->io_seq, chip_queue->io_seq_end, chip_queue->free_seq, chip_queue->free_seq_end);
 	if (tr->next >= NR_MAX_CHIP_IO) {
 		WARN_ON_ONCE("Chip queue is almost full");
@@ -380,6 +380,8 @@ static void __enqueue_trs_to_tsu(uint32_t nsid, int sqid, int cqid, int sq_entry
 		__insert_tr_to_chip_queue(e, chip_queue);
 	}
 
+	NVMEV_DEBUG("Insert req(sqid: %d, sq_entry: %d) to tsu\n",
+			sqid, sq_entry);
 	__insert_ret_to_tsu(tsu_ret);
 }
 

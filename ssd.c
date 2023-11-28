@@ -25,6 +25,7 @@ uint32_t buffer_allocate(struct buffer *buf, size_t size)
 	}
 
 	if (buf->remaining < size) {
+		NVMEV_DEBUG("buffer is full, can't allocate buffer for operation\n");
 		size = 0;
 	}
 

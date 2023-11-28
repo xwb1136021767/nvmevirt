@@ -119,8 +119,8 @@ bool zns_write_tr(struct zns_ftl *zns_ftl, struct nvmev_tsu_tr* tr)
 	else
 		bufs_to_release = spp->pgs_per_oneshotpg * spp->pgsz;
 
-	schedule_internal_operation(sqid, nsecs_completed, write_buffer,
-					bufs_to_release);
+	// schedule_internal_operation(sqid, nsecs_completed, write_buffer,
+	// 				bufs_to_release);
 	return true;
 }
 
@@ -156,7 +156,7 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 	elpn = lba_to_lpn(zns_ftl, slba + nr_lba - 1);
 	zone_elpn = zone_to_elpn(zns_ftl, zid);
 
-	NVMEV_DEBUG("%s slba 0x%llx nr_lba 0x%lx zone_id %d state %d\n", __func__, slba,
+	NVMEV_DEBUG("%s slba 0x%llx nr_lba 0x%llx zone_id %d state %d\n", __func__, slba,
 			nr_lba, zid, state);
 
 	if (zns_ftl->zp.zone_wb_size)
@@ -164,18 +164,20 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 	else
 		write_buffer = zns_ftl->ssd->write_buffer;
 
-	NVMEV_DEBUG("buffer_allocate\n");
-	if (buffer_allocate(write_buffer, LBA_TO_BYTE(nr_lba)) < LBA_TO_BYTE(nr_lba))
-		return false;
+	// if (buffer_allocate(write_buffer, LBA_TO_BYTE(nr_lba)) < LBA_TO_BYTE(nr_lba)){
+	// 	NVMEV_DEBUG("buffer_allocate failed\n");
+	// 	return false;
+	// }
+		
 
 	if ((LBA_TO_BYTE(nr_lba) % spp->write_unit_size) != 0) {
 		status = NVME_SC_ZNS_INVALID_WRITE;
 		goto out;
 	}
 
-	NVMEV_DEBUG("__check_boundary_error\n");
 	if (__check_boundary_error(zns_ftl, slba, nr_lba) == false) {
 		// return boundary error
+		NVMEV_DEBUG("__check_boundary_error failed\n");
 		status = NVME_SC_ZNS_ERR_BOUNDARY;
 		goto out;
 	}
@@ -188,7 +190,6 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 		goto out;
 	}
 
-	NVMEV_DEBUG("state machine\n");
 	switch (state) {
 	case ZONE_STATE_EMPTY: {
 		// check if slba == start lba in zone
@@ -517,7 +518,7 @@ bool zns_read(struct nvmev_ns *ns, struct nvmev_request *req, struct nvmev_resul
 	// struct nand_cmd swr;
 
 	NVMEV_DEBUG(
-		"%s slba 0x%llx nr_lba 0x%lx zone_id %d state %d wp 0x%llx last lba 0x%llx\n",
+		"%s slba 0x%llx nr_lba 0x%llx zone_id %d state %d wp 0x%llx last lba 0x%llx\n",
 		__func__, slba, nr_lba, zid, zone_descs[zid].state, zone_descs[zid].wp,
 		(slba + nr_lba - 1));
 
