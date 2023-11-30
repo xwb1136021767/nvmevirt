@@ -207,6 +207,7 @@ struct nvmev_tsu_tr {
 	uint32_t nsid;
 	uint32_t zid;
 	int sqid;
+
 	uint64_t lpn;
 	uint64_t nr_lba;
 	uint64_t pgs;
@@ -217,13 +218,14 @@ struct nvmev_tsu_tr {
 	int cmd;
 	uint64_t xfer_size; // byte
 	uint64_t stime; /* Coperd: request arrival time */
+	uint64_t nsecs_target;
+	uint64_t estimated_alone_waiting_time;
 	bool interleave_pci_dma;
 	volatile bool  is_completed;
 	volatile bool is_reclaim_by_ret;
 	struct ppa *ppa;
-	uint64_t nsecs_target;
-	unsigned int next, prev;
 
+	unsigned int next, prev;
 	struct list_head list;
 };
 

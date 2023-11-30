@@ -177,7 +177,6 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 
 	if (__check_boundary_error(zns_ftl, slba, nr_lba) == false) {
 		// return boundary error
-		NVMEV_DEBUG("__check_boundary_error failed\n");
 		status = NVME_SC_ZNS_ERR_BOUNDARY;
 		goto out;
 	}
@@ -232,10 +231,8 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 		goto out;
 	}
 
-	NVMEV_DEBUG("__increase_write_ptr\n");
 	__increase_write_ptr(zns_ftl, zid, nr_lba);
 
-	NVMEV_DEBUG("ssd_advance_write_buffer\n");
 	// get delay from nand model
 	nsecs_latest = nsecs_start;
 	// nsecs_latest = ssd_advance_write_buffer(zns_ftl->ssd, nsecs_latest, LBA_TO_BYTE(nr_lba));

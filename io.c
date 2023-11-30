@@ -9,6 +9,7 @@
 #include "dma.h"
 #include "ssd_config.h"
 #include "tsu_fifo.h"
+#include "tsu_fairness.h"
 #if (SUPPORTED_SSD_TYPE(CONV) || SUPPORTED_SSD_TYPE(ZNS))
 #include "ssd.h"
 #else
@@ -272,14 +273,36 @@ static struct nvmev_io_worker *__allocate_work_queue_entry(int sqid, unsigned in
 	return worker;
 }
 
+void traverse_chip_queue(struct nvmev_transaction_queue *chip_queue){
+	NVMEV_DEBUG("traverse io_seq -- io_end\n");
+	unsigned int curr = chip_queue->io_seq;
+	while(curr != -1){
+		struct nvmev_tsu_tr *tr = &chip_queue->queue[curr];
+		NVMEV_DEBUG("curr=%d  ", curr);
+		curr = tr->next;
+	}
+	NVMEV_DEBUG("\n");
+
+	NVMEV_DEBUG("traverse free_seq -- free_end\n");
+	curr = chip_queue->free_seq;
+	while(curr != -1){
+		struct nvmev_tsu_tr *tr = &chip_queue->queue[curr];
+		NVMEV_DEBUG("curr=%d  ", curr);
+		curr = tr->next;
+	}
+	NVMEV_DEBUG("\n");
+}
 
 struct nvmev_transaction_queue* __allocate_tr_queue_entry(uint64_t ch, uint64_t lun, unsigned int *entry){
 	struct nvmev_transaction_queue *chip_queue = &nvmev_vdev->nvmev_tsu->chip_queue[ch][lun];
 	unsigned int e = chip_queue->free_seq;
 	struct nvmev_tsu_tr *tr = chip_queue->queue + e;
 
-	NVMEV_DEBUG("BIN:  allocate entry(%u) from chip(ch: %lld, lun: %lld), its io_seq=%d, io_seq_end=%d, free_seq=%d, free_seq_end=%d\n", 
-			e, ch, lun, chip_queue->io_seq, chip_queue->io_seq_end, chip_queue->free_seq, chip_queue->free_seq_end);
+	NVMEV_DEBUG("BIN:  allocate entry(%u) from chip(ch: %lld, lun: %lld), nr_trs_in_fly: %d\n", 
+			e, ch, lun, chip_queue->nr_trs_in_fly);
+	if(ch==5 && lun==0 && e>1900)
+		traverse_chip_queue(chip_queue);
+
 	if (tr->next >= NR_MAX_CHIP_IO) {
 		WARN_ON_ONCE("Chip queue is almost full");
 		return NULL;
@@ -296,11 +319,12 @@ struct nvmev_transaction_queue* __allocate_tr_queue_entry(uint64_t ch, uint64_t 
 static void __insert_tr_to_chip_queue(unsigned int entry, struct nvmev_transaction_queue *chip_queue)
 {
 	spin_lock(&chip_queue->tr_lock);
-	chip_queue->nr_trs_in_fly++;
 	if(chip_queue->io_seq == -1){
+		NVMEV_DEBUG("chip queue has only one tr.\n");
 		chip_queue->io_seq = entry;
 		chip_queue->io_seq_end = entry;
 	}else{
+		NVMEV_DEBUG("chip queue has more than one trs.\n");
 		unsigned int curr = chip_queue->io_seq_end;
 		if(curr == -1){
 			return;
@@ -309,6 +333,7 @@ static void __insert_tr_to_chip_queue(unsigned int entry, struct nvmev_transacti
 		chip_queue->io_seq_end = entry;
 		chip_queue->queue[curr].next = entry;
 	}
+	chip_queue->nr_trs_in_fly++;
 	spin_unlock(&chip_queue->tr_lock);
 }
 
@@ -1027,6 +1052,7 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 		}
 	}
 
+	// nvmev_vdev->nvmev_tsu->schedule = schedule_fairness;
 	nvmev_vdev->nvmev_tsu->schedule = schedule_fifo;
 	nvmev_vdev->nvmev_tsu->task_struct = kthread_create(nvmev_tsu, nvmev_vdev->nvmev_tsu, "nvmev_tsu");
 	if (nvmev_vdev->config.cpu_nr_dispatcher != -1)
