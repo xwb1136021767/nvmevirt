@@ -169,6 +169,7 @@ void zns_remove_namespace(struct nvmev_ns *ns)
 	ns->ftls = NULL;
 }
 
+// Caculate max idle time of ssd, why?
 static void zns_flush(struct nvmev_ns *ns, struct nvmev_request *req, struct nvmev_result *ret)
 {
 	uint64_t start, latest;

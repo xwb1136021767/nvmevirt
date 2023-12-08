@@ -111,6 +111,12 @@ struct nand_lun {
 	uint64_t gc_endtime;
 };
 
+// struct nand_chip {
+// 	struct nand_lun *lun;
+// 	int nluns;
+// 	uint64_t gc_endtime;
+// };
+
 struct ssd_channel {
 	struct nand_lun *lun;
 	int nluns;

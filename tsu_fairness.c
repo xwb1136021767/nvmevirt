@@ -1,4 +1,7 @@
+
 #include "tsu_fairness.h"
+
+
 
 uint64_t caculate_tr_completed_time(struct nvmev_tsu_tr* tr, struct ssdparams *spp, struct ssd *ssd){
     int c = tr->cmd;
@@ -120,9 +123,73 @@ void estimate_alone_waiting_time(struct nvmev_transaction_queue* chip_queue, int
     tr->estimated_alone_waiting_time = chip_busy_time + expected_last_time;
 }
 
+double fairness_based_on_average_slowdown(struct nvmev_transaction_queue* chip_queue, unsigned int* flow_with_max_average_slowdown){
+	LIST_HEAD(sum_slowdown);
+	uint64_t total_finish_time = 0;
+	unsigned int start = chip_queue->io_seq;
+	unsigned int itr = start;
+	struct nvmev_tsu_tr* tr = &chip_queue->queue[itr];
+    struct nvmev_ns *ns = &nvmev_vdev->ns[tr->nsid];
+    struct zns_ftl *zns_ftl = (struct zns_ftl *)ns->ftls;
+	struct ssdparams *spp;
+    struct ssd *ssd = zns_ftl->ssd;
+	double slowdown_max = DBL_MIN, slowdown_min = DBL_MAX;
+	int stream_count = 0;
+	struct stream_data* data;
+	
+	spp = &ssd->sp;
+	*flow_with_max_average_slowdown = tr->sqid;
+	if(chip_queue->nr_trs_in_fly <= 1) return 1.0;
+
+
+	while(itr != -1){
+		tr = &chip_queue->queue[itr];
+		uint64_t tr_execute_time = caculate_tr_completed_time(tr, spp, ssd);
+		total_finish_time += tr_execute_time;
+
+		uint64_t transaction_alone_time = tr->estimated_alone_waiting_time + tr_execute_time;
+		uint64_t transaction_shared_time = total_finish_time + ((uint64_t)cpu_clock(ssd->cpu_nr_dispatcher) - tr->stime);
+		double slow_down = (double)transaction_shared_time / transaction_alone_time;
+
+		struct stream_data *data = FIND_ELEMENT(&sum_slowdown, tr->sqid);
+		if(data){
+			data->slow_down += slow_down;
+			data->transaction_count++;
+		}else{
+			struct stream_data *data = kmalloc(sizeof(struct stream_data), GFP_KERNEL);
+			*data = (struct stream_data){
+				.stream_id = tr->sqid,
+				.slow_down = slow_down,
+				.transaction_count = 1,
+			};
+			list_add(&data->list, &sum_slowdown);
+		}
+		itr = tr->next;
+	}
+
+	list_for_each_entry(data, &sum_slowdown, list){
+		stream_count++;
+		double average_slowdown = data->slow_down / data->transaction_count;
+		if (average_slowdown > slowdown_max)
+		{
+			slowdown_max = average_slowdown;
+			*flow_with_max_average_slowdown = data->stream_id;
+		}
+		if (average_slowdown < slowdown_min)
+			slowdown_min = average_slowdown;
+	};
+	
+	if (stream_count == 1)
+	{
+		*flow_with_max_average_slowdown = -1;
+	}
+	return (double)slowdown_min / slowdown_max;
+}
+
 void schedule_fairness(struct nvmev_tsu* tsu){
     unsigned int i,j;
-
+	double fairness = 0.0;
+	unsigned int flow_with_max_average_slowdown = 0;
     // TODO: compute fairness and reorder chip queues.
 
 
@@ -133,6 +200,8 @@ void schedule_fairness(struct nvmev_tsu* tsu){
             volatile unsigned int end = chip_queue->io_seq_end;
 			unsigned int nr_processed = 0;
 
+			if(curr == -1) continue;
+
             while(curr != -1){
                 struct nvmev_tsu_tr* tr = &chip_queue->queue[curr];
                 struct nvmev_ns *ns = &nvmev_vdev->ns[tr->nsid];
@@ -141,7 +210,9 @@ void schedule_fairness(struct nvmev_tsu* tsu){
                     continue;
                 }
 
-                // estimate_alone_waiting_time(chip_queue, curr);
+				// compute alone waiting time for 
+                estimate_alone_waiting_time(chip_queue, curr);
+				
 
                 NVMEV_DEBUG("process tr from ch: %d lun: %d zid: %d, curr = %d ,estimated_alone_waiting_time=%lld\n", 
                         i, j, tr->zid, curr, tr->estimated_alone_waiting_time);
@@ -154,6 +225,12 @@ void schedule_fairness(struct nvmev_tsu* tsu){
 				nr_processed++;
                 curr = tr->next;
             }
+
+			kernel_fpu_begin();
+			fairness = fairness_based_on_average_slowdown(chip_queue, &flow_with_max_average_slowdown);
+			kernel_fpu_end();
+			NVMEV_DEBUG("(ch: %d lun: %d) fairness: %d  flow_with_max_average_slowdown: %d\n", i, j, (int)fairness, flow_with_max_average_slowdown);
+
         }
     }
 }

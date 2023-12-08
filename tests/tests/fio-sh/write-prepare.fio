@@ -1,15 +1,15 @@
 [global]
-ioengine=psync
+ioengine=libaio
 direct=1
 filename=/dev/nvme0n1
 rw=write
-bs=256k
+bs=4k
 group_reporting
 zonemode=zbd
 
 [writeprepare]
-offset_increment=1z
 size=128z
-numjobs=1
-max_open_zones=1
+iodepth=64
+numjobs=8
+max_open_zones=4
 

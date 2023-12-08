@@ -4,9 +4,13 @@
 CONFIG_NVMEVIRT_ZNS := y
 #CONFIG_NVMEVIRT_KV := y
 
+FPU_CFLAGS += -mhard-float
+FPU_CFLAGS += -msse -msse2
+
 obj-m   := nvmev.o
 nvmev-objs := main.o pci.o admin.o io.o dma.o
 ccflags-y += -Wno-unused-variable -Wno-unused-function
+
 
 ccflags-$(CONFIG_NVMEVIRT_NVM) += -DBASE_SSD=INTEL_OPTANE
 nvmev-$(CONFIG_NVMEVIRT_NVM) += simple_ftl.o
@@ -17,6 +21,7 @@ nvmev-$(CONFIG_NVMEVIRT_SSD) += ssd.o conv_ftl.o pqueue/pqueue.o channel_model.o
 ccflags-$(CONFIG_NVMEVIRT_ZNS) += -DBASE_SSD=WD_ZN540
 #ccflags-$(CONFIG_NVMEVIRT_ZNS) += -DBASE_SSD=ZNS_PROTOTYPE
 ccflags-$(CONFIG_NVMEVIRT_ZNS) += -Wno-implicit-fallthrough
+ccflags-$(CONFIG_NVMEVIRT_ZNS)+= $(FPU_CFLAGS)
 nvmev-$(CONFIG_NVMEVIRT_ZNS) += ssd.o zns_ftl.o zns_read_write.o zns_mgmt_send.o zns_mgmt_recv.o channel_model.o tsu_fifo.o tsu_fairness.o
 
 ccflags-$(CONFIG_NVMEVIRT_KV) += -DBASE_SSD=KV_PROTOTYPE

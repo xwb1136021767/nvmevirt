@@ -300,8 +300,6 @@ struct nvmev_transaction_queue* __allocate_tr_queue_entry(uint64_t ch, uint64_t 
 
 	NVMEV_DEBUG("BIN:  allocate entry(%u) from chip(ch: %lld, lun: %lld), nr_trs_in_fly: %d\n", 
 			e, ch, lun, chip_queue->nr_trs_in_fly);
-	if(ch==5 && lun==0 && e>1900)
-		traverse_chip_queue(chip_queue);
 
 	if (tr->next >= NR_MAX_CHIP_IO) {
 		WARN_ON_ONCE("Chip queue is almost full");
@@ -320,11 +318,9 @@ static void __insert_tr_to_chip_queue(unsigned int entry, struct nvmev_transacti
 {
 	spin_lock(&chip_queue->tr_lock);
 	if(chip_queue->io_seq == -1){
-		NVMEV_DEBUG("chip queue has only one tr.\n");
 		chip_queue->io_seq = entry;
 		chip_queue->io_seq_end = entry;
 	}else{
-		NVMEV_DEBUG("chip queue has more than one trs.\n");
 		unsigned int curr = chip_queue->io_seq_end;
 		if(curr == -1){
 			return;
@@ -702,7 +698,7 @@ static size_t __nvmev_proc_io(int sqid, int sq_entry, size_t *io_size)
 	prev_clock3 = local_clock();
 #endif
 
-	__reclaim_completed_reqs();
+	// __reclaim_completed_reqs();
 
 #ifdef PERF_DEBUG
 	prev_clock4 = local_clock();
@@ -737,6 +733,7 @@ int nvmev_proc_io_sq(int sqid, int new_db, int old_db)
 	if (unlikely(num_proc < 0))
 		num_proc += sq->queue_size;
 
+	NVMEV_DEBUG("sqid: %d, received %d requests\n", sqid, num_proc);
 	for (seq = 0; seq < num_proc; seq++) {
 		size_t io_size;
 		if (!__nvmev_proc_io(sqid, sq_entry, &io_size))
@@ -1011,6 +1008,7 @@ static int nvmev_tsu(void *data){
 
 		__reclaim_completed_transactions();
 		__reclaim_completed_ret_in_tsu();
+		__reclaim_completed_reqs();
 		cond_resched();
 	}
 
@@ -1036,7 +1034,7 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 		nvmev_vdev->nvmev_tsu->chip_queue[i] = 
 			kzalloc(sizeof(struct nvmev_transaction_queue) * dies_per_ch, GFP_KERNEL);	
 		for(j=0;j<dies_per_ch;j++){
-			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue = kzalloc(sizeof(struct nvmev_transaction) * NR_MAX_CHIP_IO, GFP_KERNEL);
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue = kzalloc(sizeof(struct nvmev_tsu_tr) * NR_MAX_CHIP_IO, GFP_KERNEL);
 			for(k=0;k<NR_MAX_CHIP_IO;k++){
 				nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue[k].next = k+1;
 				nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue[k].prev = k-1;
@@ -1052,8 +1050,8 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 		}
 	}
 
-	// nvmev_vdev->nvmev_tsu->schedule = schedule_fairness;
-	nvmev_vdev->nvmev_tsu->schedule = schedule_fifo;
+	nvmev_vdev->nvmev_tsu->schedule = schedule_fairness;
+	// nvmev_vdev->nvmev_tsu->schedule = schedule_fifo;
 	nvmev_vdev->nvmev_tsu->task_struct = kthread_create(nvmev_tsu, nvmev_vdev->nvmev_tsu, "nvmev_tsu");
 	if (nvmev_vdev->config.cpu_nr_dispatcher != -1)
 		kthread_bind(nvmev_vdev->nvmev_tsu->task_struct, nvmev_vdev->config.cpu_nr_tsu);

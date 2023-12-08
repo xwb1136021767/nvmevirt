@@ -1,5 +1,5 @@
 [global]
-ioengine=psync
+ioengine=io_uring
 direct=1
 filename=/dev/nvme0n1
 rw=randread
@@ -10,5 +10,6 @@ zonemode=zbd
 [randread]
 offset_increment=1z
 size=30z
+iodepth=32
 numjobs=10
 max_open_zones=10
