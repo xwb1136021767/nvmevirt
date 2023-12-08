@@ -45,17 +45,20 @@ static inline struct ppa __lpn_to_ppa(struct zns_ftl *zns_ftl, uint64_t lpn)
 {
 	struct ssdparams *spp = &zns_ftl->ssd->sp;
 	struct znsparams *zpp = &zns_ftl->zp;
-	uint64_t zone = lpn_to_zone(zns_ftl, lpn); // find corresponding zone
+	uint64_t zone = lpn_to_zone(zns_ftl, lpn); 
 	uint64_t off = lpn - zone_to_slpn(zns_ftl, zone);
 
 	uint32_t sdie = (zone * zpp->dies_per_zone) % spp->tt_luns;
 	uint32_t die = sdie + ((off / spp->pgs_per_oneshotpg) % zpp->dies_per_zone);
 
 	uint32_t channel = die_to_channel(zns_ftl, die);
+	uint32_t chip = die_to_chip(zns_ftl, die);
 	uint32_t lun = die_to_lun(zns_ftl, die);
+	NVMEV_DEBUG("lpn: %lld ==> (zone: %lld die:%d ch: %d  chip: %d  lun: %d)\n", lpn, die, channel, chip, lun);
 	struct ppa ppa = {
 		.g = {
 			.lun = lun,
+			.chip = chip,
 			.ch = channel,
 			.pg = off % spp->pgs_per_oneshotpg,
 		},
@@ -533,11 +536,6 @@ bool zns_read(struct nvmev_ns *ns, struct nvmev_request *req, struct nvmev_resul
 	else
 		nsecs_latest += spp->fw_rd_lat;
 
-	// swr.type = USER_IO;
-	// swr.cmd = NAND_READ;
-	// swr.stime = nsecs_latest;
-	// swr.interleave_pci_dma = false;
-
 	for (lpn = slpn; lpn <= elpn; lpn += pgs) {
 		ppa = __lpn_to_ppa(zns_ftl, lpn);
 		pg_off = ppa.g.pg % spp->pgs_per_flashpg;
@@ -568,8 +566,6 @@ bool zns_read(struct nvmev_ns *ns, struct nvmev_request *req, struct nvmev_resul
 		INIT_LIST_HEAD(&tr->list);
 		list_add_tail(&tr->list, &ret->transactions);
 	}
-
-	NVMEV_DEBUG("BIN:  split tr completed\n");
 
 	// if (swr.interleave_pci_dma == false) {
 	// 	nsecs_completed = ssd_advance_pcie(zns_ftl->ssd, nsecs_latest, nr_lba * spp->secsz);

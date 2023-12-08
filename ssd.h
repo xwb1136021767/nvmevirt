@@ -55,6 +55,7 @@ enum { CELL_TYPE_LSB, CELL_TYPE_MSB, CELL_TYPE_CSB, MAX_CELL_TYPES };
 #define PAGE_BITS (16)
 #define PL_BITS (8)
 #define LUN_BITS (8)
+#define CHIP_BITS (8)
 #define CH_BITS (8)
 #define RSB_BITS (TOTAL_PPA_BITS - (BLK_BITS + PAGE_BITS + PL_BITS + LUN_BITS + CH_BITS))
 
@@ -66,6 +67,7 @@ struct ppa {
 			uint64_t blk : BLK_BITS;
 			uint64_t pl : PL_BITS;
 			uint64_t lun : LUN_BITS;
+			uint64_t chip : CHIP_BITS;
 			uint64_t ch : CH_BITS;
 			uint64_t rsv : RSB_BITS;
 		} g;
@@ -111,18 +113,25 @@ struct nand_lun {
 	uint64_t gc_endtime;
 };
 
-// struct nand_chip {
-// 	struct nand_lun *lun;
-// 	int nluns;
-// 	uint64_t gc_endtime;
-// };
-
-struct ssd_channel {
+struct nand_chip {
 	struct nand_lun *lun;
 	int nluns;
 	uint64_t gc_endtime;
+};
+
+struct ssd_channel {
+	struct nand_chip *chip;
+	int nchips;
+	uint64_t gc_endtime;
 	struct channel_model *perf_model;
 };
+
+// struct ssd_channel {
+// 	struct nand_lun *lun;
+// 	int nluns;
+// 	uint64_t gc_endtime;
+// 	struct channel_model *perf_model;
+// };
 
 struct ssd_pcie {
 	struct channel_model *perf_model;
@@ -162,7 +171,8 @@ struct ssdparams {
 	int pgs_per_blk; /* # of pages per block */
 	int blks_per_pl; /* # of blocks per plane */
 	int pls_per_lun; /* # of planes per LUN (Die) */
-	int luns_per_ch; /* # of LUNs per channel */
+	int luns_per_chip; /* # of LUNs per chip */
+	int chips_per_ch; /* # of chips per channel */
 	int nchs; /* # of channels in the SSD */
 	int cell_mode;
 
@@ -191,15 +201,18 @@ struct ssdparams {
 	unsigned long secs_per_blk; /* # of sectors per block */
 	unsigned long secs_per_pl; /* # of sectors per plane */
 	unsigned long secs_per_lun; /* # of sectors per LUN */
+	unsigned long secs_per_chip; /* # of sectors per chip */
 	unsigned long secs_per_ch; /* # of sectors per channel */
 	unsigned long tt_secs; /* # of sectors in the SSD */
 
 	unsigned long pgs_per_pl; /* # of pages per plane */
 	unsigned long pgs_per_lun; /* # of pages per LUN (Die) */
+	unsigned long pgs_per_chip; /* # of pages per chip */
 	unsigned long pgs_per_ch; /* # of pages per channel */
 	unsigned long tt_pgs; /* total # of pages in the SSD */
 
 	unsigned long blks_per_lun; /* # of blocks per LUN */
+	unsigned long blks_per_chip; /* # of blocks per chip */
 	unsigned long blks_per_ch; /* # of blocks per channel */
 	unsigned long tt_blks; /* total # of blocks in the SSD */
 
@@ -208,6 +221,7 @@ struct ssdparams {
 	unsigned long blks_per_line;
 	unsigned long tt_lines;
 
+	unsigned long pls_per_chip; /* # of planes per chip */
 	unsigned long pls_per_ch; /* # of planes per channel */
 	unsigned long tt_pls; /* total # of planes in the SSD */
 
@@ -229,10 +243,16 @@ static inline struct ssd_channel *get_ch(struct ssd *ssd, struct ppa *ppa)
 	return &(ssd->ch[ppa->g.ch]);
 }
 
-static inline struct nand_lun *get_lun(struct ssd *ssd, struct ppa *ppa)
+static inline struct nand_chip *get_chip(struct ssd *ssd, struct ppa *ppa)
 {
 	struct ssd_channel *ch = get_ch(ssd, ppa);
-	return &(ch->lun[ppa->g.lun]);
+	return &(ch->chip[ppa->g.chip]);
+}
+
+static inline struct nand_lun *get_lun(struct ssd *ssd, struct ppa *ppa)
+{
+	struct nand_chip *chip = get_chip(ssd, ppa);
+	return &(chip->lun[ppa->g.lun]);
 }
 
 static inline struct nand_plane *get_pl(struct ssd *ssd, struct ppa *ppa)

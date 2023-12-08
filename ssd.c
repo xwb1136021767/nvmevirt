@@ -73,8 +73,9 @@ void ssd_init_params(struct ssdparams *spp, uint64_t capacity, uint32_t nparts)
 	spp->pgsz = spp->secsz * spp->secs_per_pg;
 
 	spp->nchs = NAND_CHANNELS;
+	spp->chips_per_ch = CHIPS_PER_NAND_CH;
+	spp->luns_per_chip = LUNS_PER_CHIP;
 	spp->pls_per_lun = PLNS_PER_LUN;
-	spp->luns_per_ch = LUNS_PER_NAND_CH;
 	spp->cell_mode = CELL_MODE;
 
 	/* partitioning SSD by dividing channel*/
@@ -86,12 +87,12 @@ void ssd_init_params(struct ssdparams *spp, uint64_t capacity, uint32_t nparts)
 		/* flashpgs_per_blk depends on capacity */
 		spp->blks_per_pl = BLKS_PER_PLN;
 		blk_size = DIV_ROUND_UP(capacity, spp->blks_per_pl * spp->pls_per_lun *
-							  spp->luns_per_ch * spp->nchs);
+							  spp->luns_per_chip * spp->chips_per_ch * spp->nchs);
 	} else {
 		NVMEV_ASSERT(BLK_SIZE > 0);
 		blk_size = BLK_SIZE;
 		spp->blks_per_pl = DIV_ROUND_UP(capacity, blk_size * spp->pls_per_lun *
-								  spp->luns_per_ch * spp->nchs);
+								  spp->luns_per_chip * spp->chips_per_ch * spp->nchs);
 	}
 
 	NVMEV_ASSERT((ONESHOT_PAGE_SIZE % spp->pgsz) == 0 && (FLASH_PAGE_SIZE % spp->pgsz) == 0);
@@ -133,22 +134,26 @@ void ssd_init_params(struct ssdparams *spp, uint64_t capacity, uint32_t nparts)
 	spp->secs_per_blk = spp->secs_per_pg * spp->pgs_per_blk;
 	spp->secs_per_pl = spp->secs_per_blk * spp->blks_per_pl;
 	spp->secs_per_lun = spp->secs_per_pl * spp->pls_per_lun;
-	spp->secs_per_ch = spp->secs_per_lun * spp->luns_per_ch;
+	spp->secs_per_chip = spp->secs_per_lun * spp->luns_per_chip;
+	spp->secs_per_ch = spp->secs_per_chip * spp->chips_per_ch;
 	spp->tt_secs = spp->secs_per_ch * spp->nchs;
 
 	spp->pgs_per_pl = spp->pgs_per_blk * spp->blks_per_pl;
 	spp->pgs_per_lun = spp->pgs_per_pl * spp->pls_per_lun;
-	spp->pgs_per_ch = spp->pgs_per_lun * spp->luns_per_ch;
+	spp->pgs_per_chip = spp->pgs_per_lun * spp->luns_per_chip;
+	spp->pgs_per_ch = spp->pgs_per_chip * spp->chips_per_ch;
 	spp->tt_pgs = spp->pgs_per_ch * spp->nchs;
 
 	spp->blks_per_lun = spp->blks_per_pl * spp->pls_per_lun;
-	spp->blks_per_ch = spp->blks_per_lun * spp->luns_per_ch;
+	spp->blks_per_chip = spp->blks_per_lun * spp->luns_per_chip;
+	spp->blks_per_ch = spp->blks_per_chip * spp->chips_per_ch;
 	spp->tt_blks = spp->blks_per_ch * spp->nchs;
 
-	spp->pls_per_ch = spp->pls_per_lun * spp->luns_per_ch;
+	spp->pls_per_chip = spp->pls_per_lun * spp->luns_per_chip;
+	spp->pls_per_ch = spp->pls_per_chip * spp->chips_per_ch;
 	spp->tt_pls = spp->pls_per_ch * spp->nchs;
 
-	spp->tt_luns = spp->luns_per_ch * spp->nchs;
+	spp->tt_luns = spp->luns_per_chip * spp->chips_per_ch * spp->nchs;
 
 	/* line is special, put it at the end */
 	spp->blks_per_line = spp->tt_luns; /* TODO: to fix under multiplanes */
@@ -163,8 +168,8 @@ void ssd_init_params(struct ssdparams *spp, uint64_t capacity, uint32_t nparts)
 		     spp->secsz * spp->secs_per_pg;
 	blk_size = spp->pgs_per_blk * spp->secsz * spp->secs_per_pg;
 	NVMEV_INFO(
-		"Total Capacity(GiB,MiB)=%llu,%llu chs=%u luns=%lu lines=%lu blk-size(MiB,KiB)=%u,%u line-size(MiB,KiB)=%lu,%lu",
-		BYTE_TO_GB(total_size), BYTE_TO_MB(total_size), spp->nchs, spp->tt_luns,
+		"Total Capacity(GiB,MiB)=%llu,%llu chs=%u chips=%u luns=%lu lines=%lu blk-size(MiB,KiB)=%u,%u line-size(MiB,KiB)=%lu,%lu",
+		BYTE_TO_GB(total_size), BYTE_TO_MB(total_size), spp->nchs, spp->chips_per_ch * spp->nchs, spp->tt_luns,
 		spp->tt_lines, BYTE_TO_MB(spp->pgs_per_blk * spp->pgsz),
 		BYTE_TO_KB(spp->pgs_per_blk * spp->pgsz), BYTE_TO_MB(spp->pgs_per_line * spp->pgsz),
 		BYTE_TO_KB(spp->pgs_per_line * spp->pgsz));
@@ -230,6 +235,16 @@ static void ssd_remove_nand_plane(struct nand_plane *pl)
 	kfree(pl->blk);
 }
 
+static void ssd_init_nand_chip(struct nand_chip *chip, struct ssdparams *spp)
+{
+	int i;
+	chip->nluns = spp->luns_per_chip;
+	chip->lun = kmalloc(sizeof(struct nand_lun) * chip->nluns, GFP_KERNEL);
+	for (i = 0; i < chip->nluns; i++) {
+		ssd_init_nand_lun(&chip->lun[i], spp);
+	}
+}
+
 static void ssd_init_nand_lun(struct nand_lun *lun, struct ssdparams *spp)
 {
 	int i;
@@ -240,6 +255,14 @@ static void ssd_init_nand_lun(struct nand_lun *lun, struct ssdparams *spp)
 	}
 	lun->next_lun_avail_time = 0;
 	lun->busy = false;
+}
+
+static void ssd_remove_nand_chip(struct nand_chip *chip) 
+{
+	int i;
+	for (i = 0; i < chip->nluns; i++)
+		ssd_remove_nand_lun(&chip->lun[i]);
+	kfree(chip->lun);
 }
 
 static void ssd_remove_nand_lun(struct nand_lun *lun)
@@ -255,10 +278,12 @@ static void ssd_remove_nand_lun(struct nand_lun *lun)
 static void ssd_init_ch(struct ssd_channel *ch, struct ssdparams *spp)
 {
 	int i;
-	ch->nluns = spp->luns_per_ch;
-	ch->lun = kmalloc(sizeof(struct nand_lun) * ch->nluns, GFP_KERNEL);
-	for (i = 0; i < ch->nluns; i++) {
-		ssd_init_nand_lun(&ch->lun[i], spp);
+	ch->nchips = spp->chips_per_ch;
+	ch->chip = kmalloc(sizeof(struct nand_chip) * ch->nchips, GFP_KERNEL);
+	// ch->nluns = spp->luns_per_ch;
+	// ch->lun = kmalloc(sizeof(struct nand_lun) * ch->nluns, GFP_KERNEL);
+	for (i = 0; i < ch->nchips; i++) {
+		ssd_init_nand_chip(&ch->chip[i], spp);
 	}
 
 	ch->perf_model = kmalloc(sizeof(struct channel_model), GFP_KERNEL);
@@ -274,10 +299,10 @@ static void ssd_remove_ch(struct ssd_channel *ch)
 
 	kfree(ch->perf_model);
 
-	for (i = 0; i < ch->nluns; i++)
-		ssd_remove_nand_lun(&ch->lun[i]);
+	for (i = 0; i < ch->nchips; i++)
+		ssd_remove_nand_chip(&ch->chip[i]);
 
-	kfree(ch->lun);
+	kfree(ch->chip);
 }
 
 static void ssd_init_pcie(struct ssd_pcie *pcie, struct ssdparams *spp)
@@ -371,8 +396,8 @@ uint64_t ssd_advance_nand(struct ssd *ssd, struct nand_cmd *ncmd)
 	struct ppa *ppa = ncmd->ppa;
 	uint32_t cell;
 	NVMEV_DEBUG(
-		"SSD: %p, Enter stime: %lld, ch %d lun %d blk %d page %d command %d ppa 0x%llx\n",
-		ssd, ncmd->stime, ppa->g.ch, ppa->g.lun, ppa->g.blk, ppa->g.pg, c, ppa->ppa);
+		"SSD: %p, Enter stime: %lld, ch %d chip %d lun %d blk %d page %d command %d ppa 0x%llx\n",
+		ssd, ncmd->stime, ppa->g.ch, ppa->g.chip, ppa->g.lun, ppa->g.blk, ppa->g.pg, c, ppa->ppa);
 
 	if (ppa->ppa == UNMAPPED_PPA) {
 		NVMEV_ERROR("Error ppa 0x%llx\n", ppa->ppa);
@@ -456,15 +481,17 @@ uint64_t ssd_advance_nand(struct ssd *ssd, struct nand_cmd *ncmd)
 uint64_t ssd_next_idle_time(struct ssd *ssd)
 {
 	struct ssdparams *spp = &ssd->sp;
-	uint32_t i, j;
+	uint32_t i, j, k;
 	uint64_t latest = __get_ioclock(ssd);
 
 	for (i = 0; i < spp->nchs; i++) {
 		struct ssd_channel *ch = &ssd->ch[i];
-
-		for (j = 0; j < spp->luns_per_ch; j++) {
-			struct nand_lun *lun = &ch->lun[j];
-			latest = max(latest, lun->next_lun_avail_time);
+		for(j = 0; j < spp->luns_per_chip; j++) {
+			struct nand_chip *chip = &ch->chip[j];
+			for(k = 0; k < chip->nluns; k++){
+				struct nand_lun *lun = &chip->lun[k];
+				latest = max(latest, lun->next_lun_avail_time);
+			}
 		}
 	}
 
