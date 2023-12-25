@@ -54,7 +54,8 @@ static inline struct ppa __lpn_to_ppa(struct zns_ftl *zns_ftl, uint64_t lpn)
 	uint32_t channel = die_to_channel(zns_ftl, die);
 	uint32_t chip = die_to_chip(zns_ftl, die);
 	uint32_t lun = die_to_lun(zns_ftl, die);
-	NVMEV_DEBUG("lpn: %lld ==> (zone: %lld die:%d ch: %d  chip: %d  lun: %d)\n", lpn, die, channel, chip, lun);
+	NVMEV_DEBUG("dies_per_zone: %d tt_luns: %ld pgs_per_oneshotpg: %d\n", zpp->dies_per_zone, spp->tt_luns, spp->pgs_per_oneshotpg);
+	NVMEV_DEBUG("lpn: %lld ==> (zone: %lld die:%d ch: %d  chip: %d  lun: %d)\n", lpn, zone, die, channel, chip, lun);
 	struct ppa ppa = {
 		.g = {
 			.lun = lun,

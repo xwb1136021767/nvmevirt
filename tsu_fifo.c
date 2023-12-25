@@ -3,7 +3,7 @@
 void schedule_fifo(struct nvmev_tsu* tsu){
     unsigned int i,j;
     for(i=0;i<tsu->nchs;i++){
-        for(j=0;j<tsu->dies_per_ch;j++){
+        for(j=0;j<tsu->nchips;j++){
             struct nvmev_transaction_queue* chip_queue = &tsu->chip_queue[i][j];
             volatile unsigned int curr = chip_queue->io_seq;
             volatile unsigned int end = chip_queue->io_seq_end;

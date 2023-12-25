@@ -1,10 +1,8 @@
-
 #include "tsu_fairness.h"
-
-
 
 uint64_t caculate_tr_completed_time(struct nvmev_tsu_tr* tr, struct ssdparams *spp, struct ssd *ssd){
     int c = tr->cmd;
+	uint64_t cmd_stime = (tr->stime == 0) ? __get_clock() : tr->stime;
 	uint64_t nand_stime, nand_etime;
 	uint64_t chnl_stime, chnl_etime;
 	uint64_t remaining, xfer_size, completed_time;
@@ -21,6 +19,7 @@ uint64_t caculate_tr_completed_time(struct nvmev_tsu_tr* tr, struct ssdparams *s
 	switch (c) {
 	case NAND_READ:
 		/* read: perform NAND cmd first */
+		nand_stime = max(lun->next_lun_avail_time, cmd_stime);
 		if (tr->xfer_size == 4096) {
 			nand_etime = nand_stime + spp->pg_4kb_rd_lat[cell];
 		} else {
@@ -44,7 +43,7 @@ uint64_t caculate_tr_completed_time(struct nvmev_tsu_tr* tr, struct ssdparams *s
 			chnl_stime = chnl_etime;
 		}
 
-		lun->next_lun_avail_time = chnl_etime;
+		// lun->next_lun_avail_time = chnl_etime;
 		break;
 
 	case NAND_WRITE:
@@ -54,20 +53,20 @@ uint64_t caculate_tr_completed_time(struct nvmev_tsu_tr* tr, struct ssdparams *s
 		/* write: then do NAND program */
 		nand_stime = chnl_etime;
 		nand_etime = nand_stime + spp->pg_wr_lat;
-		lun->next_lun_avail_time = nand_etime;
+		// lun->next_lun_avail_time = nand_etime;
 		completed_time = nand_etime;
 		break;
 
 	case NAND_ERASE:
 		/* erase: only need to advance NAND status */
 		nand_etime = nand_stime + spp->blk_er_lat;
-		lun->next_lun_avail_time = nand_etime;
+		// lun->next_lun_avail_time = nand_etime;
 		completed_time = nand_etime;
 		break;
 
 	case NAND_NOP:
 		/* no operation: just return last completed time of lun */
-		lun->next_lun_avail_time = nand_stime;
+		// lun->next_lun_avail_time = nand_stime;
 		completed_time = nand_stime;
 		break;
 
@@ -136,11 +135,10 @@ double fairness_based_on_average_slowdown(struct nvmev_transaction_queue* chip_q
 	double slowdown_max = DBL_MIN, slowdown_min = DBL_MAX;
 	int stream_count = 0;
 	struct stream_data* data;
-	
 	spp = &ssd->sp;
 	*flow_with_max_average_slowdown = tr->sqid;
-	if(chip_queue->nr_trs_in_fly <= 1) return 1.0;
 
+	if(chip_queue->nr_trs_in_fly <= 1) return 1.0;
 
 	while(itr != -1){
 		tr = &chip_queue->queue[itr];
@@ -148,7 +146,7 @@ double fairness_based_on_average_slowdown(struct nvmev_transaction_queue* chip_q
 		total_finish_time += tr_execute_time;
 
 		uint64_t transaction_alone_time = tr->estimated_alone_waiting_time + tr_execute_time;
-		uint64_t transaction_shared_time = total_finish_time + ((uint64_t)cpu_clock(ssd->cpu_nr_dispatcher) - tr->stime);
+		uint64_t transaction_shared_time = total_finish_time + (__get_clock() - tr->stime);
 		double slow_down = (double)transaction_shared_time / transaction_alone_time;
 
 		struct stream_data *data = FIND_ELEMENT(&sum_slowdown, tr->sqid);
@@ -167,6 +165,7 @@ double fairness_based_on_average_slowdown(struct nvmev_transaction_queue* chip_q
 		itr = tr->next;
 	}
 
+	// Find the stream with max slowdown 
 	list_for_each_entry(data, &sum_slowdown, list){
 		stream_count++;
 		double average_slowdown = data->slow_down / data->transaction_count;
@@ -194,7 +193,7 @@ void schedule_fairness(struct nvmev_tsu* tsu){
 
 
     for(i=0;i<tsu->nchs;i++){
-        for(j=0;j<tsu->dies_per_ch;j++){
+        for(j=0;j<tsu->nchips;j++){
             struct nvmev_transaction_queue* chip_queue = &tsu->chip_queue[i][j];
             volatile unsigned int curr = chip_queue->io_seq;
             volatile unsigned int end = chip_queue->io_seq_end;
@@ -210,6 +209,7 @@ void schedule_fairness(struct nvmev_tsu* tsu){
                     continue;
                 }
 
+				tr->stime = __get_clock();
 				// compute alone waiting time for 
                 estimate_alone_waiting_time(chip_queue, curr);
 				
@@ -230,7 +230,9 @@ void schedule_fairness(struct nvmev_tsu* tsu){
 			fairness = fairness_based_on_average_slowdown(chip_queue, &flow_with_max_average_slowdown);
 			kernel_fpu_end();
 			NVMEV_DEBUG("(ch: %d lun: %d) fairness: %d  flow_with_max_average_slowdown: %d\n", i, j, (int)fairness, flow_with_max_average_slowdown);
-
         }
     }
 }
+
+
+

@@ -293,13 +293,13 @@ void traverse_chip_queue(struct nvmev_transaction_queue *chip_queue){
 	NVMEV_DEBUG("\n");
 }
 
-struct nvmev_transaction_queue* __allocate_tr_queue_entry(uint64_t ch, uint64_t lun, unsigned int *entry){
-	struct nvmev_transaction_queue *chip_queue = &nvmev_vdev->nvmev_tsu->chip_queue[ch][lun];
+struct nvmev_transaction_queue* __allocate_tr_queue_entry(uint64_t channel, uint64_t chip, unsigned int *entry){
+	struct nvmev_transaction_queue *chip_queue = &nvmev_vdev->nvmev_tsu->chip_queue[channel][chip];
 	unsigned int e = chip_queue->free_seq;
 	struct nvmev_tsu_tr *tr = chip_queue->queue + e;
 
 	NVMEV_DEBUG("BIN:  allocate entry(%u) from chip(ch: %lld, lun: %lld), nr_trs_in_fly: %d\n", 
-			e, ch, lun, chip_queue->nr_trs_in_fly);
+			e, channel, chip, chip_queue->nr_trs_in_fly);
 
 	if (tr->next >= NR_MAX_CHIP_IO) {
 		WARN_ON_ONCE("Chip queue is almost full");
@@ -360,9 +360,9 @@ static void __enqueue_trs_to_tsu(uint32_t nsid, int sqid, int cqid, int sq_entry
 	};
 
 	list_for_each_entry(entry, &ret->transactions, list) {
-		uint64_t ch = entry->swr->ppa->g.ch;
-		uint64_t lun = entry->swr->ppa->g.lun;
-		chip_queue = __allocate_tr_queue_entry(ch, lun, &e);
+		uint64_t channel = entry->swr->ppa->g.ch;
+		uint64_t chip = entry->swr->ppa->g.chip;
+		chip_queue = __allocate_tr_queue_entry(channel, chip, &e);
 		if(!chip_queue)
 			return;
 
@@ -397,12 +397,10 @@ static void __enqueue_trs_to_tsu(uint32_t nsid, int sqid, int cqid, int sq_entry
 
 		mb(); /* TSU worker shall see the updated tr at once */
 
-		NVMEV_DEBUG("BIN:  insert tr to chip-queue, ch: %lld lun: %lld entry: %u\n", ch, lun, e);
+		NVMEV_DEBUG("BIN:  insert tr to chip-queue, ch: %lld lun: %lld entry: %u\n", channel, chip, e);
 		__insert_tr_to_chip_queue(e, chip_queue);
 	}
 
-	NVMEV_DEBUG("Insert req(sqid: %d, sq_entry: %d) to tsu\n",
-			sqid, sq_entry);
 	__insert_ret_to_tsu(tsu_ret);
 }
 
@@ -531,10 +529,10 @@ static void __reclaim_completed_transactions(void)
 	struct nvmev_transaction_queue* chip_queue;
 	struct nvmev_tsu_tr* tr;
 	int nchs = nvmev_vdev->nvmev_tsu->nchs;
-	int dies_per_ch = nvmev_vdev->nvmev_tsu->dies_per_ch;
+	int nchips = nvmev_vdev->nvmev_tsu->nchips;
 	unsigned int i, j;
 	for(i=0;i<nchs;i++){
-		for(j=0;j<dies_per_ch;j++){
+		for(j=0;j<nchips;j++){
 			unsigned int first_entry = -1;
 			unsigned int last_entry = -1;
 			unsigned int curr;
@@ -996,8 +994,6 @@ void NVMEV_IO_WORKER_FINAL(struct nvmev_dev *nvmev_vdev)
 
 static int nvmev_tsu(void *data){
 	struct nvmev_tsu *tsu=(struct nvmev_tsu *)data;
-	int nchs = NAND_CHANNELS;
-    int dies_per_ch = LUNS_PER_NAND_CH;
 
 	NVMEV_INFO("nvmev_tsu started on cpu %d (node %d)\n",
 		   nvmev_vdev->config.cpu_nr_tsu,
@@ -1017,25 +1013,25 @@ static int nvmev_tsu(void *data){
 
 void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
     int nchs = NAND_CHANNELS;
-    int dies_per_ch = LUNS_PER_NAND_CH;
+    int nchips = CHIPS_PER_NAND_CH;
 	unsigned int i, j, k;
 
 	nvmev_vdev->nvmev_tsu = kcalloc(sizeof(struct nvmev_tsu), 1, GFP_KERNEL);
 	*(nvmev_vdev->nvmev_tsu) = (struct nvmev_tsu){
 		.nchs = nchs,
-		.dies_per_ch = dies_per_ch,
+		.nchips = nchips,
 		.ret_queue = LIST_HEAD_INIT(nvmev_vdev->nvmev_tsu->ret_queue),
 	};
 	spin_lock_init(&nvmev_vdev->nvmev_tsu->ret_lock);
 	
+	// Initialize chip queues for tsu.
 	nvmev_vdev->nvmev_tsu->chip_queue = kzalloc(sizeof(struct nvmev_transaction_queue*) * nchs, GFP_KERNEL);
-	for(i=0;i<nchs;i++){
-		
+	for( i = 0; i < nchs; i++){
 		nvmev_vdev->nvmev_tsu->chip_queue[i] = 
-			kzalloc(sizeof(struct nvmev_transaction_queue) * dies_per_ch, GFP_KERNEL);	
-		for(j=0;j<dies_per_ch;j++){
+			kzalloc(sizeof(struct nvmev_transaction_queue) * nchips, GFP_KERNEL);	
+		for( j = 0; j < nchips; j++){
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue = kzalloc(sizeof(struct nvmev_tsu_tr) * NR_MAX_CHIP_IO, GFP_KERNEL);
-			for(k=0;k<NR_MAX_CHIP_IO;k++){
+			for( k = 0; k < NR_MAX_CHIP_IO; k++){
 				nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue[k].next = k+1;
 				nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue[k].prev = k-1;
 			}
@@ -1050,6 +1046,7 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 		}
 	}
 
+	// Initilize schedule method for tsu.
 	nvmev_vdev->nvmev_tsu->schedule = schedule_fairness;
 	// nvmev_vdev->nvmev_tsu->schedule = schedule_fifo;
 	nvmev_vdev->nvmev_tsu->task_struct = kthread_create(nvmev_tsu, nvmev_vdev->nvmev_tsu, "nvmev_tsu");
@@ -1061,10 +1058,10 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 void NVMEV_TSU_FINAL(struct nvmev_dev *nvmev_vdev){
 	unsigned int i,j;
 	int nchs = NAND_CHANNELS;
-    int dies_per_ch = LUNS_PER_NAND_CH;
+    int nchips = CHIPS_PER_NAND_CH;
 
 	for(i=0;i<nchs;i++){
-		for(j=0;j<dies_per_ch;j++){
+		for(j=0;j<nchips;j++){
 			kfree(nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue);
 		}
 		kfree(nvmev_vdev->nvmev_tsu->chip_queue[i]);

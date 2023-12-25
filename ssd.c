@@ -77,6 +77,7 @@ void ssd_init_params(struct ssdparams *spp, uint64_t capacity, uint32_t nparts)
 	spp->luns_per_chip = LUNS_PER_CHIP;
 	spp->pls_per_lun = PLNS_PER_LUN;
 	spp->cell_mode = CELL_MODE;
+	spp->nchips = (spp->nchs * spp->chips_per_ch);
 
 	/* partitioning SSD by dividing channel*/
 	NVMEV_ASSERT((spp->nchs % nparts) == 0);
@@ -235,16 +236,6 @@ static void ssd_remove_nand_plane(struct nand_plane *pl)
 	kfree(pl->blk);
 }
 
-static void ssd_init_nand_chip(struct nand_chip *chip, struct ssdparams *spp)
-{
-	int i;
-	chip->nluns = spp->luns_per_chip;
-	chip->lun = kmalloc(sizeof(struct nand_lun) * chip->nluns, GFP_KERNEL);
-	for (i = 0; i < chip->nluns; i++) {
-		ssd_init_nand_lun(&chip->lun[i], spp);
-	}
-}
-
 static void ssd_init_nand_lun(struct nand_lun *lun, struct ssdparams *spp)
 {
 	int i;
@@ -257,12 +248,14 @@ static void ssd_init_nand_lun(struct nand_lun *lun, struct ssdparams *spp)
 	lun->busy = false;
 }
 
-static void ssd_remove_nand_chip(struct nand_chip *chip) 
+static void ssd_init_nand_chip(struct nand_chip *chip, struct ssdparams *spp)
 {
 	int i;
-	for (i = 0; i < chip->nluns; i++)
-		ssd_remove_nand_lun(&chip->lun[i]);
-	kfree(chip->lun);
+	chip->nluns = spp->luns_per_chip;
+	chip->lun = kmalloc(sizeof(struct nand_lun) * chip->nluns, GFP_KERNEL);
+	for (i = 0; i < chip->nluns; i++) {
+		ssd_init_nand_lun(&chip->lun[i], spp);
+	}
 }
 
 static void ssd_remove_nand_lun(struct nand_lun *lun)
@@ -273,6 +266,14 @@ static void ssd_remove_nand_lun(struct nand_lun *lun)
 		ssd_remove_nand_plane(&lun->pl[i]);
 
 	kfree(lun->pl);
+}
+
+static void ssd_remove_nand_chip(struct nand_chip *chip) 
+{
+	int i;
+	for (i = 0; i < chip->nluns; i++)
+		ssd_remove_nand_lun(&chip->lun[i]);
+	kfree(chip->lun);
 }
 
 static void ssd_init_ch(struct ssd_channel *ch, struct ssdparams *spp)

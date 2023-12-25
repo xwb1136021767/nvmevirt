@@ -124,14 +124,18 @@ static inline uint32_t die_to_channel(struct zns_ftl *zns_ftl, uint32_t die)
 // TODO: convert die to chip
 static inline uint32_t die_to_chip(struct zns_ftl *zns_ftl, uint32_t die)
 {
-	return (die) % zns_ftl->ssd->sp.nchs;
+	return die_to_channel(zns_ftl, die) % ( zns_ftl->ssd->sp.chips_per_ch );
 }
 
-// TODO: convert die to lun
 static inline uint32_t die_to_lun(struct zns_ftl *zns_ftl, uint32_t die)
 {
-	return (die) / zns_ftl->ssd->sp.nchs;
+	return die_to_chip(zns_ftl, die) / zns_ftl->ssd->sp.luns_per_chip;
 }
+
+// static inline uint32_t die_to_lun(struct zns_ftl *zns_ftl, uint32_t die)
+// {
+// 	return (die) / zns_ftl->ssd->sp.nchs;
+// }
 
 static inline uint64_t lba_to_lpn(struct zns_ftl *zns_ftl, uint64_t lba)
 {

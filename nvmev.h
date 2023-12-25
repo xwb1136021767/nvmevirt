@@ -238,6 +238,9 @@ struct nvmev_transaction_queue {
 	unsigned int io_seq; /* io req head index */
 	unsigned int io_seq_end; /* io req tail index */
 	unsigned int nr_trs_in_fly;
+
+	// fairness
+	
 };
 
 struct nvmev_result_tsu {
@@ -260,7 +263,7 @@ struct nvmev_tsu {
 	unsigned long long latest_nsecs;
 	unsigned int id;
 	int nchs;
-	int dies_per_ch;
+	int nchips;
 	struct task_struct *task_struct;
 	char thread_name[32];
 

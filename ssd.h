@@ -173,6 +173,7 @@ struct ssdparams {
 	int pls_per_lun; /* # of planes per LUN (Die) */
 	int luns_per_chip; /* # of LUNs per chip */
 	int chips_per_ch; /* # of chips per channel */
+	int nchips; /* # of chips in the SSD */
 	int nchs; /* # of channels in the SSD */
 	int cell_mode;
 
