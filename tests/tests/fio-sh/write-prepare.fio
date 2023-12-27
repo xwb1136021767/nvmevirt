@@ -1,0 +1,15 @@
+[global]
+ioengine=libaio
+direct=1
+filename=/dev/nvme0n1
+rw=write
+bs=1M
+group_reporting
+zonemode=zbd
+
+[writeprepare]
+size=8G
+iodepth=64
+numjobs=1
+max_open_zones=10
+

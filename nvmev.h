@@ -238,9 +238,11 @@ struct nvmev_transaction_queue {
 	unsigned int io_seq; /* io req head index */
 	unsigned int io_seq_end; /* io req tail index */
 	unsigned int nr_trs_in_fly;
-
-	// fairness
+	unsigned int nr_luns;
 	
+	// fairness
+	unsigned int nr_packages;
+	struct list_head transaction_package_list;
 };
 
 struct nvmev_result_tsu {

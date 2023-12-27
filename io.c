@@ -525,7 +525,6 @@ static void __reclaim_completed_ret_in_tsu(void)
 */
 static void __reclaim_completed_transactions(void)
 {
-	// xNVMEV_DEBUG("BIN:  zns append and write command, __reclaim_completed_transactions");
 	struct nvmev_transaction_queue* chip_queue;
 	struct nvmev_tsu_tr* tr;
 	int nchs = nvmev_vdev->nvmev_tsu->nchs;
@@ -1039,10 +1038,13 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 			
 			spin_lock_init(&nvmev_vdev->nvmev_tsu->chip_queue[i][j].tr_lock);
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_trs_in_fly = 0;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_luns = LUNS_PER_CHIP;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_packages = 0;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].free_seq = 0;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].free_seq_end = NR_MAX_CHIP_IO-1;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].io_seq = -1;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].io_seq_end = -1;
+			INIT_LIST_HEAD(&nvmev_vdev->nvmev_tsu->chip_queue[i][j].transaction_package_list);
 		}
 	}
 
