@@ -179,14 +179,14 @@ static_assert((ZONE_SIZE % DIES_PER_ZONE) == 0);
 #define LUNS_PER_CHIP (4)
 #define PLNS_PER_LUN (1) /* not used*/
 #define DIES_PER_ZONE (1)
-// #define DIES_PER_ZONE (NAND_CHANNELS * LUNS_PER_NAND_CH)
+// #define DIES_PER_ZONE (NAND_CHANNELS * CHIPS_PER_NAND_CH * LUNS_PER_CHIP)
 
 #define FLASH_PAGE_SIZE KB(32)
 #define ONESHOT_PAGE_SIZE (FLASH_PAGE_SIZE * 3)
 /*In an emulator environment, it may be too large to run an application
   which requires a certain number of zones or more.
   So, adjust the zone size to fit your environment */
-#define ZONE_SIZE MB(64ULL)
+#define ZONE_SIZE MB(32ULL)
 
 static_assert((ONESHOT_PAGE_SIZE % FLASH_PAGE_SIZE) == 0);
 
@@ -216,9 +216,12 @@ static_assert((ONESHOT_PAGE_SIZE % FLASH_PAGE_SIZE) == 0);
 #define GLOBAL_WB_SIZE (0)
 #define WRITE_EARLY_COMPLETION 1
 
+#define BLKS_PER_PLN (8192)
+#define BLK_SIZE (0) /*BLKS_PER_PLN should not be 0 */
+
 /* Don't modify followings. BLK_SIZE is caculated from ZONE_SIZE and DIES_PER_ZONE */
-#define BLKS_PER_PLN 0 /* BLK_SIZE should not be 0 */
-#define BLK_SIZE (ZONE_SIZE / DIES_PER_ZONE)
+// #define BLKS_PER_PLN 0 /* BLK_SIZE should not be 0 */
+// #define BLK_SIZE (ZONE_SIZE / DIES_PER_ZONE)
 static_assert((ZONE_SIZE % DIES_PER_ZONE) == 0);
 
 /* For ZRWA */

@@ -64,6 +64,36 @@ static void check_params(struct ssdparams *spp)
 	//ftl_assert(is_power_of_2(spp->nchs));
 }
 
+static void display_spp(struct ssdparams *spp) {
+	// NVMEV_INFO(
+	// 	"flashpgs_per_blk: %d , oneshotpgs_per_blk: %d",
+	// 	spp->flashpgs_per_blk, spp->oneshotpgs_per_blk,
+	// 	spp->blks_per_pl, spp->blks_per_lun, spp->blks_per_chip, spp->blks_per_ch,
+	// 	spp->chips_per_ch, spp->luns_per_chip, spp->nchips, spp->nchs,
+	// 	spp->pgsz,
+	// 	spp->pgs_per_blk, spp->pgs_per_oneshotpg, spp->pgs_per_pl, spp->pgs_per_lun, spp->pgs_per_chip, spp->pgs_per_ch,
+	// 	spp->pls_per_lun, spp->pls_per_chip, spp->pls_per_ch,
+	// 	spp->tt_blks, spp->tt_pgs, spp->tt_luns
+	// );
+
+	NVMEV_INFO(
+    "flashpgs_per_blk: %d , oneshotpgs_per_blk: %d, "
+    "blks_per_pl: %d, blks_per_lun: %d, blks_per_chip: %d, blks_per_ch: %d, "
+    "chips_per_ch: %d, luns_per_chip: %d, nchips: %d, nchs: %d, "
+    "pgsz: %d, "
+    "pgs_per_blk: %d, pgs_per_oneshotpg: %d, pgs_per_pl: %d, pgs_per_lun: %d, pgs_per_chip: %d, pgs_per_ch: %d, "
+    "pls_per_lun: %d, pls_per_chip: %d, pls_per_ch: %d, "
+    "tt_blks: %d, tt_pgs: %d, tt_luns: %d",
+    spp->flashpgs_per_blk, spp->oneshotpgs_per_blk,
+    spp->blks_per_pl, spp->blks_per_lun, spp->blks_per_chip, spp->blks_per_ch,
+    spp->chips_per_ch, spp->luns_per_chip, spp->nchips, spp->nchs,
+    spp->pgsz,
+    spp->pgs_per_blk, spp->pgs_per_oneshotpg, spp->pgs_per_pl, spp->pgs_per_lun, spp->pgs_per_chip, spp->pgs_per_ch,
+    spp->pls_per_lun, spp->pls_per_chip, spp->pls_per_ch,
+    spp->tt_blks, spp->tt_pgs, spp->tt_luns
+);
+}
+
 void ssd_init_params(struct ssdparams *spp, uint64_t capacity, uint32_t nparts)
 {
 	uint64_t blk_size, total_size;
@@ -174,6 +204,8 @@ void ssd_init_params(struct ssdparams *spp, uint64_t capacity, uint32_t nparts)
 		spp->tt_lines, BYTE_TO_MB(spp->pgs_per_blk * spp->pgsz),
 		BYTE_TO_KB(spp->pgs_per_blk * spp->pgsz), BYTE_TO_MB(spp->pgs_per_line * spp->pgsz),
 		BYTE_TO_KB(spp->pgs_per_line * spp->pgsz));
+	
+	display_spp(spp);
 }
 
 static void ssd_init_nand_page(struct nand_page *pg, struct ssdparams *spp)

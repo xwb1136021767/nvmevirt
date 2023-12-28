@@ -608,6 +608,7 @@ static void __reclaim_completed_reqs(void)
 		}
 
 		if (last_entry != -1) {
+			spin_lock(&worker->entry_lock);
 			w = &worker->work_queue[last_entry];
 			worker->io_seq = w->next;
 			if (w->next != -1) {
@@ -622,6 +623,7 @@ static void __reclaim_completed_reqs(void)
 			w->next = first_entry;
 
 			worker->free_seq_end = last_entry;
+			spin_unlock(&worker->entry_lock);
 			NVMEV_DEBUG_VERBOSE("%s: %u -- %u, %d\n", __func__,
 					first_entry, last_entry, nr_reclaimed);
 		}
@@ -1062,6 +1064,10 @@ void NVMEV_TSU_FINAL(struct nvmev_dev *nvmev_vdev){
 	int nchs = NAND_CHANNELS;
     int nchips = CHIPS_PER_NAND_CH;
 
+	if (!IS_ERR_OR_NULL(nvmev_vdev->nvmev_tsu)) {
+		kthread_stop(nvmev_vdev->nvmev_tsu->task_struct);
+	}
+
 	for(i=0;i<nchs;i++){
 		for(j=0;j<nchips;j++){
 			kfree(nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue);
@@ -1069,9 +1075,5 @@ void NVMEV_TSU_FINAL(struct nvmev_dev *nvmev_vdev){
 		kfree(nvmev_vdev->nvmev_tsu->chip_queue[i]);
 	}
 	kfree(nvmev_vdev->nvmev_tsu->chip_queue);
-
-	if (!IS_ERR_OR_NULL(nvmev_vdev->nvmev_tsu)) {
-		kthread_stop(nvmev_vdev->nvmev_tsu->task_struct);
-	}
 	kfree(nvmev_vdev->nvmev_tsu);
 }

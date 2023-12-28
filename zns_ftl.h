@@ -116,20 +116,26 @@ static inline uint64_t zone_to_elpn(struct zns_ftl *zns_ftl, uint32_t zid)
 	return zone_to_elba(zns_ftl, zid) / zns_ftl->ssd->sp.secs_per_pg;
 }
 
+/**
+ * zone partitioning layout
+ *  | 1 | 2|  
+ *  |
+ *  |
+ *  |
+*/
 static inline uint32_t die_to_channel(struct zns_ftl *zns_ftl, uint32_t die)
 {
 	return (die) % zns_ftl->ssd->sp.nchs;
 }
 
-// TODO: convert die to chip
 static inline uint32_t die_to_chip(struct zns_ftl *zns_ftl, uint32_t die)
 {
-	return die_to_channel(zns_ftl, die) % ( zns_ftl->ssd->sp.chips_per_ch );
+	return ((die)/(zns_ftl->ssd->sp.nchs)) % ( zns_ftl->ssd->sp.chips_per_ch );
 }
 
 static inline uint32_t die_to_lun(struct zns_ftl *zns_ftl, uint32_t die)
 {
-	return die_to_chip(zns_ftl, die) / zns_ftl->ssd->sp.luns_per_chip;
+	return (((die)/(zns_ftl->ssd->sp.nchs))/(zns_ftl->ssd->sp.luns_per_chip)) % (zns_ftl->ssd->sp.luns_per_chip);
 }
 
 // static inline uint32_t die_to_lun(struct zns_ftl *zns_ftl, uint32_t die)

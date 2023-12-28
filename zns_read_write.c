@@ -55,7 +55,7 @@ static inline struct ppa __lpn_to_ppa(struct zns_ftl *zns_ftl, uint64_t lpn)
 	uint32_t chip = die_to_chip(zns_ftl, die);
 	uint32_t lun = die_to_lun(zns_ftl, die);
 	NVMEV_DEBUG("dies_per_zone: %d tt_luns: %ld pgs_per_oneshotpg: %d\n", zpp->dies_per_zone, spp->tt_luns, spp->pgs_per_oneshotpg);
-	NVMEV_DEBUG("lpn: %lld ==> (zone: %lld die:%d ch: %d  chip: %d  lun: %d)\n", lpn, zone, die, channel, chip, lun);
+	NVMEV_DEBUG("lpn: %lld ==> (zone: %lld sdie: %d die: %d ch: %d  chip: %d  lun: %d)\n", lpn, zone, sdie ,die, channel, chip, lun);
 	struct ppa ppa = {
 		.g = {
 			.lun = lun,
@@ -242,6 +242,7 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 	// nsecs_latest = ssd_advance_write_buffer(zns_ftl->ssd, nsecs_latest, LBA_TO_BYTE(nr_lba));
 	nsecs_xfer_completed = nsecs_latest;
 
+	NVMEV_DEBUG("req sqid: %d slpn:%lld -- elpn:%lld \n", req->sq_id, slpn, elpn);
 	for (lpn = slpn; lpn <= elpn; lpn += pgs) {
 		struct ppa ppa;
 		uint64_t pg_off;
@@ -274,8 +275,8 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 			INIT_LIST_HEAD(&tr->list);
 			list_add_tail(&tr->list, &ret->transactions);
 			
-			NVMEV_DEBUG("Split req(slba 0x%llx nr_lba 0x%llx  zid %d) to tr (zid: %u lpn: %lld)\n",
-						slba, nr_lba, zid, zid, lpn);
+			NVMEV_DEBUG("Split req(slba 0x%llx nr_lba 0x%lld  zid %d) to tr (zid: %u lpn: %lld pg_off: %lld pgs: %lld)\n",
+						slba, nr_lba, zid, zid, lpn, pg_off, pgs);
 			// struct nand_cmd swr = {
 			// 	.type = USER_IO,
 			// 	.cmd = NAND_WRITE,

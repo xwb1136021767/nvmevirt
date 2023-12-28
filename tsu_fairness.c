@@ -222,14 +222,14 @@ void delete_node(struct nvmev_transaction_queue* chip_queue, unsigned int node) 
 	unsigned int prev = chip_queue->queue[node].prev;
 	unsigned int next = chip_queue->queue[node].next;
 
-	NVMEV_DEBUG("node= %d, prev= %d next= %d \n", node, prev, next);
-
 	if(prev != -1)
 		chip_queue->queue[prev].next = next;
 	if(next != -1)
 		chip_queue->queue[next].prev = prev;
 	chip_queue->queue[node].prev = -1;
 	chip_queue->queue[node].next = -1;
+	if(node == chip_queue->io_seq_end) 
+		chip_queue->io_seq_end = prev;
 }
 
 void add_node_after(struct nvmev_transaction_queue* chip_queue, unsigned int node, unsigned int curr) {
@@ -241,6 +241,19 @@ void add_node_after(struct nvmev_transaction_queue* chip_queue, unsigned int nod
 	chip_queue->queue[curr].next = node;
 	if(next != -1)
 		chip_queue->queue[next].prev = node;
+	if(curr == chip_queue->io_seq_end)
+		chip_queue->io_seq_end = node;
+}
+
+void display_chip_queue(struct nvmev_transaction_queue* chip_queue){
+	unsigned int curr = chip_queue->io_seq;
+	NVMEV_DEBUG("------begin-------------");
+	while(curr != -1){
+		struct nvmev_tsu_tr* tr = &chip_queue->queue[curr];
+		NVMEV_DEBUG("entry=%d ch=%d chip=%d die=%d is_completed=%d is_reclaim_by_ret=%d\n", curr, tr->ppa->g.ch, tr->ppa->g.chip, tr->ppa->g.lun, tr->is_completed, tr->is_reclaim_by_ret);
+		curr = tr->next;
+	}
+	NVMEV_DEBUG("------end-------------");
 }
 
 void move_node_after(struct nvmev_transaction_queue* chip_queue, unsigned int node, unsigned int curr) {
@@ -254,6 +267,8 @@ void reorder_for_zone_conflict(struct nvmev_transaction_queue* chip_queue) {
 	unsigned int curr = chip_queue->io_seq;
 	if(curr == -1) return;
 	
+	NVMEV_DEBUG("chip queue before reorder\n");
+	display_chip_queue(chip_queue);
 	struct transaction_package *package;
 	list_for_each_entry(package, &chip_queue->transaction_package_list, list){
 		struct transaction_entry *entry;
@@ -269,6 +284,9 @@ void reorder_for_zone_conflict(struct nvmev_transaction_queue* chip_queue) {
 		clear_transactions_in_package(package);
 	}
 	clear_packages(chip_queue);
+
+	NVMEV_DEBUG("chip queue after reorder\n");
+	display_chip_queue(chip_queue);
 }
 
 void schedule_fairness(struct nvmev_tsu* tsu){
@@ -284,7 +302,7 @@ void schedule_fairness(struct nvmev_tsu* tsu){
 			if(curr == -1) continue;
 
 			get_transaction_packages_without_zone_conflict(chip_queue);
-			// reorder_for_zone_conflict(chip_queue);
+			reorder_for_zone_conflict(chip_queue);
             while(curr != -1){
                 struct nvmev_tsu_tr* tr = &chip_queue->queue[curr];
                 struct nvmev_ns *ns = &nvmev_vdev->ns[tr->nsid];
