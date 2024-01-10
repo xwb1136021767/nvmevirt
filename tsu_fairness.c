@@ -190,16 +190,17 @@ double fairness_based_on_average_slowdown(struct nvmev_transaction_queue* chip_q
 */
 void get_transaction_packages_without_zone_conflict(struct nvmev_transaction_queue* chip_queue) {
 	volatile unsigned int curr = chip_queue->io_seq;
-
+	struct transaction_package* package;
+	struct nvmev_tsu_tr* tr;
+	bool find_package = false;
 	while (curr != -1){
-		struct nvmev_tsu_tr* tr = &chip_queue->queue[curr];
+		tr = &chip_queue->queue[curr];
 		if(tr->is_completed) {
 			curr = tr->next;
 			continue;
 		}
 
-		struct transaction_package* package;
-		bool find_package = false;
+		find_package = false;
 		list_for_each_entry(package, &chip_queue->transaction_package_list, list) {
 			if(!is_die_used(package, tr->ppa->g.lun)){
 				set_die_used(package, tr->ppa->g.lun);
@@ -247,13 +248,19 @@ void add_node_after(struct nvmev_transaction_queue* chip_queue, unsigned int nod
 
 void display_chip_queue(struct nvmev_transaction_queue* chip_queue){
 	unsigned int curr = chip_queue->io_seq;
-	NVMEV_DEBUG("------begin-------------");
+	struct nvmev_tsu_tr* tr;
+	NVMEV_INFO("------begin-------------");
 	while(curr != -1){
-		struct nvmev_tsu_tr* tr = &chip_queue->queue[curr];
-		NVMEV_DEBUG("entry=%d ch=%d chip=%d die=%d is_completed=%d is_reclaim_by_ret=%d\n", curr, tr->ppa->g.ch, tr->ppa->g.chip, tr->ppa->g.lun, tr->is_completed, tr->is_reclaim_by_ret);
+		tr = &chip_queue->queue[curr];
+		if(tr->is_completed) {
+			curr = tr->next;
+			continue;
+		}
+
+		NVMEV_INFO("sqid: %d entry=%d ch=%d chip=%d die=%d is_completed=%d is_reclaim_by_ret=%d\n", tr->sqid, curr, tr->ppa->g.ch, tr->ppa->g.chip, tr->ppa->g.lun, tr->is_completed, tr->is_reclaim_by_ret);
 		curr = tr->next;
 	}
-	NVMEV_DEBUG("------end-------------");
+	NVMEV_INFO("------end-------------");
 }
 
 void move_node_after(struct nvmev_transaction_queue* chip_queue, unsigned int node, unsigned int curr) {
@@ -263,15 +270,46 @@ void move_node_after(struct nvmev_transaction_queue* chip_queue, unsigned int no
 	add_node_after(chip_queue, node, curr);
 }
 
+unsigned int get_nr_used_dies(struct nvmev_transaction_queue* chip_queue)
+{
+	DECLARE_BITMAP(used_die_bitmap, LUNS_PER_CHIP);
+	unsigned int curr = chip_queue->io_seq;
+	struct nvmev_tsu_tr* tr;
+	unsigned int nr_used_dies = 0;
+	int lun;
+
+	while(curr != -1){
+		tr = &chip_queue->queue[curr];
+		lun = tr->ppa->g.lun;
+		if(tr->is_completed) {
+			curr = tr->next;
+			continue;
+		}
+
+		if(!test_bit(lun, used_die_bitmap)){
+			nr_used_dies++;
+			set_bit(lun, used_die_bitmap);
+		}
+		curr = tr->next;
+	}
+	return nr_used_dies;
+}
+
 void reorder_for_zone_conflict(struct nvmev_transaction_queue* chip_queue) {
 	unsigned int curr = chip_queue->io_seq;
+	struct transaction_package *package;
+	struct transaction_entry *entry;
+	unsigned int nr_used_dies;
 	if(curr == -1) return;
 	
-	NVMEV_DEBUG("chip queue before reorder\n");
-	display_chip_queue(chip_queue);
-	struct transaction_package *package;
+	nr_used_dies = get_nr_used_dies(chip_queue);
+	if(nr_used_dies > 1) {
+		NVMEV_INFO("nr_used_dies: %d, chip queue before reorder\n", nr_used_dies);
+		display_chip_queue(chip_queue);
+	}
+	// NVMEV_INFO("chip queue before reorder\n");
+	// display_chip_queue(chip_queue);
 	list_for_each_entry(package, &chip_queue->transaction_package_list, list){
-		struct transaction_entry *entry;
 		list_for_each_entry(entry, &package->transactions_list, list){
 			if(curr != entry->entry){
 				// Move entry to the back of curr.
@@ -284,16 +322,14 @@ void reorder_for_zone_conflict(struct nvmev_transaction_queue* chip_queue) {
 		clear_transactions_in_package(package);
 	}
 	clear_packages(chip_queue);
-
-	NVMEV_DEBUG("chip queue after reorder\n");
-	display_chip_queue(chip_queue);
 }
 
 void schedule_fairness(struct nvmev_tsu* tsu){
     unsigned int i,j;
 	double fairness = 0.0;
 	unsigned int flow_with_max_average_slowdown = 0;
-
+	uint64_t delta = 0;
+	msleep(1);
     for(i=0;i<tsu->nchs;i++){
         for(j=0;j<tsu->nchips;j++){
             struct nvmev_transaction_queue* chip_queue = &tsu->chip_queue[i][j];
@@ -320,6 +356,7 @@ void schedule_fairness(struct nvmev_tsu* tsu){
                 NVMEV_DEBUG("process tr from ch: %d lun: %d zid: %d, curr = %d ,estimated_alone_waiting_time=%lld\n", 
                         i, j, tr->zid, curr, tr->estimated_alone_waiting_time);
                 if (!ns->proc_tr_cmd(ns, tr)){
+					NVMEV_DEBUG("tr: %d sqid: %d sq_entry: %d failed\n", curr, tr->sqid, tr->sqid);
                     return;
                 }
                 

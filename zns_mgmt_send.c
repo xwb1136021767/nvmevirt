@@ -111,8 +111,8 @@ static void __reset_zone(struct zns_ftl *zns_ftl, uint64_t zid)
 	uint32_t zone_size = zns_ftl->zp.zone_size;
 	uint8_t *zone_start_addr = (uint8_t *)get_storage_addr_from_zid(zns_ftl, zid);
 
-	NVMEV_ZNS_DEBUG("%s ns %d zid %lu start addres 0x%llx zone_size %x \n", __func__,
-			zns_ftl->ns, zid, (uint64_t)zone_start_addr, zone_size);
+	NVMEV_DEBUG("%s zid %lu start address 0x%llx zone_size %x \n", __func__,
+			zid, (uint64_t)zone_start_addr, zone_size);
 
 	memset(zone_start_addr, 0, zone_size);
 
@@ -125,11 +125,12 @@ static void __reset_zone(struct zns_ftl *zns_ftl, uint64_t zid)
 
 static uint32_t __zmgmt_send_reset_zone(struct zns_ftl *zns_ftl, uint64_t zid)
 {
+	NVMEV_DEBUG("__zmgmt_send_reset_zone");
 	struct zone_descriptor *zone_descs = zns_ftl->zone_descs;
 	enum zone_state cur_state = zone_descs[zid].state;
 	bool is_zrwa_zone = zone_descs[zid].zrwav;
 	uint32_t status = NVME_SC_SUCCESS;
-
+	
 	switch (cur_state) {
 	case ZONE_STATE_OPENED_IMPL:
 	case ZONE_STATE_OPENED_EXPL:
@@ -152,6 +153,8 @@ static uint32_t __zmgmt_send_reset_zone(struct zns_ftl *zns_ftl, uint64_t zid)
 		break;
 	}
 
+	if(status != NVME_SC_SUCCESS) 
+		NVMEV_DEBUG("reset zone failed\n");
 	return status;
 }
 
@@ -235,22 +238,40 @@ static uint32_t __zmgmt_send(struct zns_ftl *zns_ftl, uint64_t slba, uint32_t ac
 
 	switch (action) {
 	case ZSA_CLOSE_ZONE:
+		NVMEV_DEBUG("ZSA_CLOSE_ZONE\n");
 		status = __zmgmt_send_close_zone(zns_ftl, zid);
+		if(status != NVME_SC_SUCCESS)
+			NVMEV_DEBUG("ZSA_CLOSE_ZONE failed\n");
 		break;
 	case ZSA_FINISH_ZONE:
+		NVMEV_DEBUG("ZSA_FINISH_ZONE\n");
 		status = __zmgmt_send_finish_zone(zns_ftl, zid);
+		if(status != NVME_SC_SUCCESS)
+			NVMEV_DEBUG("ZSA_FINISH_ZONE failed\n");
 		break;
 	case ZSA_OPEN_ZONE:
+		NVMEV_DEBUG("ZSA_OPEN_ZONE\n");
 		status = __zmgmt_send_open_zone(zns_ftl, zid, option);
+		if(status != NVME_SC_SUCCESS)
+			NVMEV_DEBUG("ZSA_OPEN_ZONE failed\n");
 		break;
 	case ZSA_RESET_ZONE:
+		NVMEV_DEBUG("ZSA_RESET_ZONE\n");
 		status = __zmgmt_send_reset_zone(zns_ftl, zid);
+		if(status != NVME_SC_SUCCESS)
+			NVMEV_DEBUG("ZSA_RESET_ZONE failed\n");
 		break;
 	case ZSA_OFFLINE_ZONE:
+		NVMEV_DEBUG("ZSA_OFFLINE_ZONE\n");
 		status = __zmgmt_send_offline_zone(zns_ftl, zid);
+		if(status != NVME_SC_SUCCESS)
+			NVMEV_DEBUG("ZSA_OFFLINE_ZONE failed\n");
 		break;
 	case ZSA_FLUSH_EXPL_ZRWA:
+		NVMEV_DEBUG("ZSA_FLUSH_EXPL_ZRWA\n");
 		status = __zmgmt_send_flush_explicit_zrwa(zns_ftl, slba);
+		if(status != NVME_SC_SUCCESS)
+			NVMEV_DEBUG("ZSA_FLUSH_EXPL_ZRWA failed\n");
 		break;
 	}
 

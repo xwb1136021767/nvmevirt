@@ -41,6 +41,8 @@ static void __increase_write_ptr(struct zns_ftl *zns_ftl, uint32_t zid, uint32_t
 	}
 }
 
+
+
 static inline struct ppa __lpn_to_ppa(struct zns_ftl *zns_ftl, uint64_t lpn)
 {
 	struct ssdparams *spp = &zns_ftl->ssd->sp;
@@ -54,8 +56,7 @@ static inline struct ppa __lpn_to_ppa(struct zns_ftl *zns_ftl, uint64_t lpn)
 	uint32_t channel = die_to_channel(zns_ftl, die);
 	uint32_t chip = die_to_chip(zns_ftl, die);
 	uint32_t lun = die_to_lun(zns_ftl, die);
-	NVMEV_DEBUG("dies_per_zone: %d tt_luns: %ld pgs_per_oneshotpg: %d\n", zpp->dies_per_zone, spp->tt_luns, spp->pgs_per_oneshotpg);
-	NVMEV_DEBUG("lpn: %lld ==> (zone: %lld sdie: %d die: %d ch: %d  chip: %d  lun: %d)\n", lpn, zone, sdie ,die, channel, chip, lun);
+	// NVMEV_INFO("lpn: %lld ==> (zone: %lld sdie: %d die: %d ch: %d  chip: %d  lun: %d)\n", lpn, zone, sdie ,die, channel, chip, lun);
 	struct ppa ppa = {
 		.g = {
 			.lun = lun,
@@ -117,6 +118,7 @@ bool zns_write_tr(struct zns_ftl *zns_ftl, struct nvmev_tsu_tr* tr)
 		zns_ftl->zp.zone_size % (spp->pgs_per_oneshotpg * spp->pgsz);
 	uint64_t nsecs_completed = ssd_advance_nand(zns_ftl->ssd, &swr);
 	tr->nsecs_target = max(tr->nsecs_target, nsecs_completed);
+
 
 	if (((lpn + pgs - 1) == zone_elpn) && (unaligned_space > 0))
 		bufs_to_release = unaligned_space;

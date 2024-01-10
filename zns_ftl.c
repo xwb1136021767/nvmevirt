@@ -121,6 +121,25 @@ static void zns_init_ftl(struct zns_ftl *zns_ftl, struct znsparams *zpp, struct 
 	__init_resource(zns_ftl);
 }
 
+static void display_zone_to_die(struct zns_ftl *zns_ftl) {
+	uint32_t zid = 0;
+	uint32_t die;
+	uint64_t slpn;
+	uint32_t channel, chip, lun;
+	struct ssdparams *spp = &zns_ftl->ssd->sp;
+	struct znsparams *zpp = &zns_ftl->zp;
+	NVMEV_INFO("=================ZNS================");
+	for(; zid < zns_ftl->zp.nr_zones ; zid++){
+		die = (zid * zpp->dies_per_zone) % spp->tt_luns;
+		slpn = zone_to_slpn(zns_ftl, zid);
+		channel = die_to_channel(zns_ftl, die);
+		chip = die_to_chip(zns_ftl, die);
+		lun = die_to_lun(zns_ftl, die);
+		NVMEV_INFO("zone: %d ==> die: %d slpn: %lld channel: %d chip: %d lun: %d\n", zid, die, slpn, channel, chip, lun);
+	}
+	NVMEV_INFO("=================ZNS================");
+}
+
 void zns_init_namespace(struct nvmev_ns *ns, uint32_t id, uint64_t size, void *mapped_addr,
 			uint32_t cpu_nr_dispatcher)
 {
@@ -153,6 +172,8 @@ void zns_init_namespace(struct nvmev_ns *ns, uint32_t id, uint64_t size, void *m
 		.proc_io_cmd = zns_proc_nvme_io_cmd,
 		.proc_tr_cmd = zns_proc_nvme_tr_cmd,
 	};
+
+	display_zone_to_die(zns_ftl);
 	return;
 }
 
@@ -213,6 +234,7 @@ bool zns_proc_nvme_io_cmd(struct nvmev_ns *ns, struct nvmev_request *req, struct
 	/*still not support multi partitions ...*/
 	NVMEV_ASSERT(ns->nr_parts == 1);
 
+	NVMEV_DEBUG("req sqid: %d sq_entry: %d opcode: %d \n", req->sq_id, req->sq_entry, req->cmd->common.opcode);
 	switch (cmd->common.opcode) {
 	case nvme_cmd_write:
 	case nvme_cmd_zone_append:

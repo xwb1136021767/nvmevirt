@@ -5,6 +5,7 @@
 #include <linux/sched/clock.h>
 #include <linux/delay.h>
 #include <linux/bitmap.h>
+#include <linux/ktime.h>
 #include "nvmev.h"
 #include "ssd.h"
 #include "zns_ftl.h"

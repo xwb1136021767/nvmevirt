@@ -212,7 +212,7 @@ static void __insert_req_sorted(unsigned int entry, struct nvmev_io_worker *work
 	 * Also, this O(n) implementation can be improved to O(logn) scheme with
 	 * e.g., red-black tree but....
 	 */
-	spin_lock(&worker->entry_lock);
+	// spin_lock(&worker->entry_lock);
 	if (worker->io_seq == -1) {
 		worker->io_seq = entry;
 		worker->io_seq_end = entry;
@@ -245,7 +245,7 @@ static void __insert_req_sorted(unsigned int entry, struct nvmev_io_worker *work
 			worker->work_queue[curr].next = entry;
 		}
 	}
-	spin_unlock(&worker->entry_lock);
+	// spin_unlock(&worker->entry_lock);
 }
 
 static struct nvmev_io_worker *__allocate_work_queue_entry(int sqid, unsigned int *entry)
@@ -264,9 +264,9 @@ static struct nvmev_io_worker *__allocate_work_queue_entry(int sqid, unsigned in
 		io_worker_turn = 0;
 	nvmev_vdev->io_worker_turn = io_worker_turn;
 	
-	spin_lock(&worker->entry_lock);
+	// spin_lock(&worker->entry_lock);
 	worker->free_seq = w->next;
-	spin_unlock(&worker->entry_lock);
+	// spin_unlock(&worker->entry_lock);
 	BUG_ON(worker->free_seq >= NR_MAX_PARALLEL_IO);
 	*entry = e;
 
@@ -298,9 +298,6 @@ struct nvmev_transaction_queue* __allocate_tr_queue_entry(uint64_t channel, uint
 	unsigned int e = chip_queue->free_seq;
 	struct nvmev_tsu_tr *tr = chip_queue->queue + e;
 
-	NVMEV_DEBUG("BIN:  allocate entry(%u) from chip(ch: %lld, lun: %lld), nr_trs_in_fly: %d\n", 
-			e, channel, chip, chip_queue->nr_trs_in_fly);
-
 	if (tr->next >= NR_MAX_CHIP_IO) {
 		WARN_ON_ONCE("Chip queue is almost full");
 		return NULL;
@@ -323,6 +320,7 @@ static void __insert_tr_to_chip_queue(unsigned int entry, struct nvmev_transacti
 	}else{
 		unsigned int curr = chip_queue->io_seq_end;
 		if(curr == -1){
+			spin_unlock(&chip_queue->tr_lock);
 			return;
 		}
 		chip_queue->queue[entry].prev = curr;
@@ -345,10 +343,12 @@ static void __enqueue_trs_to_tsu(uint32_t nsid, int sqid, int cqid, int sq_entry
 			     struct nvmev_result *ret)
 {
 	unsigned int e;
+	bool has_transactions = false;
 	struct nvmev_transaction_queue* chip_queue;
 	struct nvmev_tsu_tr* tr;
 	struct nvmev_transaction *entry;
 	struct nvmev_result_tsu *tsu_ret = kmalloc(sizeof(struct nvmev_result_tsu), GFP_KERNEL);
+	uint64_t channel, chip;
 	*(tsu_ret) = (struct nvmev_result_tsu){
 		.sqid = sqid,
 		.cqid = cqid,
@@ -360,17 +360,24 @@ static void __enqueue_trs_to_tsu(uint32_t nsid, int sqid, int cqid, int sq_entry
 	};
 
 	list_for_each_entry(entry, &ret->transactions, list) {
-		uint64_t channel = entry->swr->ppa->g.ch;
-		uint64_t chip = entry->swr->ppa->g.chip;
+		if(!has_transactions) has_transactions = true;
+		
+		channel = entry->swr->ppa->g.ch;
+		chip = entry->swr->ppa->g.chip;
 		chip_queue = __allocate_tr_queue_entry(channel, chip, &e);
 		if(!chip_queue)
 			return;
 
+		NVMEV_DEBUG("allocate entry(%u) from chip(ch: %lld, lun: %lld) for req(sqid: %d sq_entry: %d)\n", 
+			e, channel, chip, sqid, sq_entry);
+
 		/* dispatch transactions to chip queue*/
+		spin_lock(&chip_queue->tr_lock);
 		tr = chip_queue->queue + e;
 		tr->nsid = entry->nsid;
 		tr->zid = entry->zid;
 		tr->sqid = sqid;
+		tr->sq_entry = sq_entry;
 		tr->lpn =  entry->lpn;
 		tr->nr_lba = entry->nr_lba;
 		tr->pgs = entry->pgs;
@@ -389,18 +396,18 @@ static void __enqueue_trs_to_tsu(uint32_t nsid, int sqid, int cqid, int sq_entry
 		*(tr->ppa) = *(entry->swr->ppa);
 		tr->prev = -1;
 		tr->next = -1;
-
+		
 
 		/* Add tr to tsu_ret's transaction list, so that TSU can calculate resquest's response time. */
 		INIT_LIST_HEAD(&tr->list);
 		list_add_tail(&tr->list, &tsu_ret->transactions);
+		spin_unlock(&chip_queue->tr_lock);
 
 		mb(); /* TSU worker shall see the updated tr at once */
-
-		NVMEV_DEBUG("BIN:  insert tr to chip-queue, ch: %lld lun: %lld entry: %u\n", channel, chip, e);
 		__insert_tr_to_chip_queue(e, chip_queue);
 	}
 
+	tsu_ret->has_transactions = has_transactions;
 	__insert_ret_to_tsu(tsu_ret);
 }
 
@@ -423,7 +430,7 @@ static void __enqueue_io_req(int sqid, int cqid, int sq_entry, unsigned long lon
 		    ret->nsecs_target - nsecs_start);
 	
 	/////////////////////////////////
-	spin_lock(&worker->entry_lock);
+	// spin_lock_irq(&worker->entry_lock);
 	w->sqid = sqid;
 	w->cqid = cqid;
 	w->sq_entry = sq_entry;
@@ -438,11 +445,35 @@ static void __enqueue_io_req(int sqid, int cqid, int sq_entry, unsigned long lon
 	w->next = -1;
 
 	w->is_internal = false;
-	spin_unlock(&worker->entry_lock);
+	// spin_unlock_irq(&worker->entry_lock);
 	mb(); /* IO worker shall see the updated w at once */
 
 	__insert_req_sorted(entry, worker, ret->nsecs_target);
 }
+
+static void dispatch_req(uint32_t nsid, int sqid, int cqid, int sq_entry, unsigned long long nsecs_start,
+			     struct nvmev_result *ret, struct nvme_command *cmd) 
+{
+	switch(cmd->common.opcode){
+		case nvme_cmd_read:
+		case nvme_cmd_write:
+		case nvme_cmd_zone_append:
+			__enqueue_trs_to_tsu(nsid, sqid, cqid, sq_entry, nsecs_start, ret);
+			break;
+		case nvme_cmd_flush:
+		case nvme_cmd_zone_mgmt_send:
+		case nvme_cmd_zone_mgmt_recv:
+			__enqueue_io_req(sqid, cqid, sq_entry, nsecs_start, ret);
+			break;
+		default:
+			NVMEV_ERROR("%s: unimplemented command: %s(%d)\n", __func__,
+					nvme_opcode_string(cmd->common.opcode), cmd->common.opcode);
+			break;
+	}
+
+}
+
+
 
 void schedule_internal_operation(int sqid, unsigned long long nsecs_target,
 				 struct buffer *write_buffer, size_t buffs_to_release)
@@ -501,7 +532,7 @@ static void __reclaim_completed_ret_in_tsu(void)
 		}
 
 		/*If all transactions completed, remove ret from ret_queue*/
-		if(all_tr_completed == true){
+		if(all_tr_completed  || !ret_entry->has_transactions){
 			struct nvmev_result ret = {
 				.nsecs_target = ret_entry->nsecs_target,
 				.status = ret_entry->status,
@@ -608,7 +639,7 @@ static void __reclaim_completed_reqs(void)
 		}
 
 		if (last_entry != -1) {
-			spin_lock(&worker->entry_lock);
+			// spin_lock(&worker->entry_lock);
 			w = &worker->work_queue[last_entry];
 			worker->io_seq = w->next;
 			if (w->next != -1) {
@@ -623,7 +654,7 @@ static void __reclaim_completed_reqs(void)
 			w->next = first_entry;
 
 			worker->free_seq_end = last_entry;
-			spin_unlock(&worker->entry_lock);
+			// spin_unlock(&worker->entry_lock);
 			NVMEV_DEBUG_VERBOSE("%s: %u -- %u, %d\n", __func__,
 					first_entry, last_entry, nr_reclaimed);
 		}
@@ -645,6 +676,7 @@ static size_t __nvmev_proc_io(int sqid, int sq_entry, size_t *io_size)
 	struct nvmev_request req = {
 		.cmd = cmd,
 		.sq_id = sqid,
+		.sq_entry = sq_entry,
 		.nsecs_start = nsecs_start,
 	};
 	struct nvmev_result ret = {
@@ -673,26 +705,8 @@ static size_t __nvmev_proc_io(int sqid, int sq_entry, size_t *io_size)
 	prev_clock2 = local_clock();
 #endif
 	NVMEV_DEBUG("sq_entry %d, nsecs_start %lld nsecs_target %lld\n", sq_entry, nsecs_start, ret.nsecs_target);
-	
-	switch(cmd->common.opcode){
-		case nvme_cmd_read:
-		case nvme_cmd_write:
-		case nvme_cmd_zone_append:
-			__enqueue_trs_to_tsu(nsid, sqid, sq->cqid, sq_entry, nsecs_start, &ret);
-			break;
-		case nvme_cmd_flush:
-		case nvme_cmd_zone_mgmt_send:
-		case nvme_cmd_zone_mgmt_recv:
-			__enqueue_io_req(sqid, sq->cqid, sq_entry, nsecs_start, &ret);
-			break;
-		default:
-			NVMEV_ERROR("%s: unimplemented command: %s(%d)\n", __func__,
-					nvme_opcode_string(cmd->common.opcode), cmd->common.opcode);
-			break;
-	}
-	// __enqueue_trs_to_tsu(nsid, sqid, sq->cqid, sq_entry, nsecs_start, &ret);
-	// __enqueue_io_req(sqid, sq->cqid, sq_entry, nsecs_start, &ret);
-
+	// dispatch_req(nsid, sqid, sq->cqid, sq_entry, nsecs_start, &ret, cmd);
+	__enqueue_trs_to_tsu(nsid, sqid, sq->cqid, sq_entry, nsecs_start, &ret);
 #ifdef PERF_DEBUG
 	prev_clock3 = local_clock();
 #endif
@@ -726,13 +740,17 @@ int nvmev_proc_io_sq(int sqid, int new_db, int old_db)
 	int seq;
 	int sq_entry = old_db;
 	int latest_db;
+	// int turn = sq->loop_turn;
+	// sq->loop_turn = (turn + 1) % sq->queue_size;
 
 	if (unlikely(!sq))
 		return old_db;
 	if (unlikely(num_proc < 0))
 		num_proc += sq->queue_size;
 
-	NVMEV_DEBUG("sqid: %d, received %d requests\n", sqid, num_proc);
+	// if(num_proc < 20 && turn < 200) return old_db;
+	// sq->loop_turn = 0;
+	// NVMEV_INFO("sqid: %d, received %d requests\n", sqid, num_proc);
 	for (seq = 0; seq < num_proc; seq++) {
 		size_t io_size;
 		if (!__nvmev_proc_io(sqid, sq_entry, &io_size))
@@ -833,7 +851,11 @@ static int nvmev_io_worker(void *data)
 		while (curr != -1) {
 			struct nvmev_io_work *w = &worker->work_queue[curr];
 			unsigned long long curr_nsecs = local_clock() + delta;
+			// unsigned long long curr_nsecs =  __get_wallclock();
+			
+			// spin_lock_irq(&worker->entry_lock);
 			worker->latest_nsecs = curr_nsecs;
+			// spin_unlock_irq(&worker->entry_lock);
 
 			if (w->is_completed == true) {
 				curr = w->next;
@@ -866,7 +888,9 @@ static int nvmev_io_worker(void *data)
 #ifdef PERF_DEBUG
 				w->nsecs_copy_done = local_clock() + delta;
 #endif
+				// spin_lock_irq(&worker->entry_lock);
 				w->is_copied = true;
+				// spin_unlock_irq(&worker->entry_lock);
 
 				NVMEV_DEBUG_VERBOSE("%s: copied %u, %d %d %d\n", worker->thread_name, curr,
 					    w->sqid, w->cqid, w->sq_entry);
@@ -897,7 +921,9 @@ static int nvmev_io_worker(void *data)
 					     w->nsecs_target - w->nsecs_start);
 #endif
 				mb(); /* Reclaimer shall see after here */
+				// spin_lock_irq(&worker->entry_lock);
 				w->is_completed = true;
+				// spin_unlock_irq(&worker->entry_lock);
 			}
 
 			curr = w->next;

@@ -16,7 +16,7 @@
 #undef CONFIG_NVMEV_DEBUG_VERBOSE
 
 /*************************/
-#define CONFIG_NVMEV_DEBUG
+// #define CONFIG_NVMEV_DEBUG
 // #define CONFIG_NVMEV_DEBUG_VERBOSE
 #define NVMEV_DRV_NAME "NVMeVirt"
 #define NVMEV_VERSION 0x0110
@@ -87,6 +87,7 @@ struct nvmev_submission_queue {
 	bool phys_contig;
 
 	int queue_size;
+	int loop_turn;
 
 	struct nvmev_sq_stat stat;
 
@@ -207,6 +208,7 @@ struct nvmev_tsu_tr {
 	uint32_t nsid;
 	uint32_t zid;
 	int sqid;
+	int sq_entry;
 
 	uint64_t lpn;
 	uint64_t nr_lba;
@@ -252,6 +254,7 @@ struct nvmev_result_tsu {
 	uint32_t status;
 	uint64_t nsecs_start;
 	uint64_t nsecs_target;
+	bool has_transactions;
 
 	struct list_head transactions;
 	struct list_head list;
@@ -344,13 +347,14 @@ struct nvmev_dev {
 struct nvmev_request {
 	struct nvme_command *cmd;
 	uint32_t sq_id;
+	int sq_entry;
 	uint64_t nsecs_start;
 };
 
 struct nvmev_result {
 	uint32_t status;
 	uint64_t nsecs_target;
-	
+
 	struct list_head transactions;
 };
 

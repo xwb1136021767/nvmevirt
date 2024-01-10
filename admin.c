@@ -123,6 +123,7 @@ static void __nvmev_admin_create_sq(int eid)
 
 	sq->priority = cmd->sq_flags & 0xFFFE;
 	sq->queue_size = cmd->qsize + 1;
+	sq->loop_turn = 0;
 
 	/* TODO Physically non-contiguous prp list */
 	sq->phys_contig = (cmd->sq_flags & NVME_QUEUE_PHYS_CONTIG) ? true : false;
