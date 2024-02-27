@@ -78,12 +78,12 @@ static void display_spp(struct ssdparams *spp) {
 
 	NVMEV_INFO(
     "flashpgs_per_blk: %d , oneshotpgs_per_blk: %d, "
-    "blks_per_pl: %d, blks_per_lun: %d, blks_per_chip: %d, blks_per_ch: %d, "
+    "blks_per_pl: %d, blks_per_lun: %ld, blks_per_chip: %ld, blks_per_ch: %ld, "
     "chips_per_ch: %d, luns_per_chip: %d, nchips: %d, nchs: %d, "
     "pgsz: %d, "
-    "pgs_per_blk: %d, pgs_per_oneshotpg: %d, pgs_per_pl: %d, pgs_per_lun: %d, pgs_per_chip: %d, pgs_per_ch: %d, "
-    "pls_per_lun: %d, pls_per_chip: %d, pls_per_ch: %d, "
-    "tt_blks: %d, tt_pgs: %d, tt_luns: %d",
+    "pgs_per_blk: %d, pgs_per_oneshotpg: %d, pgs_per_pl: %ld, pgs_per_lun: %ld, pgs_per_chip: %ld, pgs_per_ch: %ld, "
+    "pls_per_lun: %d, pls_per_chip: %ld, pls_per_ch: %ld, "
+    "tt_blks: %ld, tt_pgs: %ld, tt_luns: %ld",
     spp->flashpgs_per_blk, spp->oneshotpgs_per_blk,
     spp->blks_per_pl, spp->blks_per_lun, spp->blks_per_chip, spp->blks_per_ch,
     spp->chips_per_ch, spp->luns_per_chip, spp->nchips, spp->nchs,

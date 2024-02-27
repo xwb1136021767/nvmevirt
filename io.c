@@ -273,25 +273,6 @@ static struct nvmev_io_worker *__allocate_work_queue_entry(int sqid, unsigned in
 	return worker;
 }
 
-void traverse_chip_queue(struct nvmev_transaction_queue *chip_queue){
-	NVMEV_DEBUG("traverse io_seq -- io_end\n");
-	unsigned int curr = chip_queue->io_seq;
-	while(curr != -1){
-		struct nvmev_tsu_tr *tr = &chip_queue->queue[curr];
-		NVMEV_DEBUG("curr=%d  ", curr);
-		curr = tr->next;
-	}
-	NVMEV_DEBUG("\n");
-
-	NVMEV_DEBUG("traverse free_seq -- free_end\n");
-	curr = chip_queue->free_seq;
-	while(curr != -1){
-		struct nvmev_tsu_tr *tr = &chip_queue->queue[curr];
-		NVMEV_DEBUG("curr=%d  ", curr);
-		curr = tr->next;
-	}
-	NVMEV_DEBUG("\n");
-}
 
 struct nvmev_transaction_queue* __allocate_tr_queue_entry(uint64_t channel, uint64_t chip, unsigned int *entry){
 	struct nvmev_transaction_queue *chip_queue = &nvmev_vdev->nvmev_tsu->chip_queue[channel][chip];
@@ -368,8 +349,8 @@ static void __enqueue_trs_to_tsu(uint32_t nsid, int sqid, int cqid, int sq_entry
 		if(!chip_queue)
 			return;
 
-		NVMEV_DEBUG("allocate entry(%u) from chip(ch: %lld, lun: %lld) for req(sqid: %d sq_entry: %d)\n", 
-			e, channel, chip, sqid, sq_entry);
+		// NVMEV_INFO("allocate entry(%u) from chip(ch: %lld, lun: %lld) for req(sqid: %d sq_entry: %d)\n", 
+		// 	e, channel, chip, sqid, sq_entry);
 
 		/* dispatch transactions to chip queue*/
 		spin_lock(&chip_queue->tr_lock);
@@ -390,6 +371,7 @@ static void __enqueue_trs_to_tsu(uint32_t nsid, int sqid, int cqid, int sq_entry
 		tr->stime = entry->swr->stime;
 		tr->interleave_pci_dma = entry->swr->interleave_pci_dma;
 		tr->is_completed = false;
+		tr->is_copyed = false;
 		tr->is_reclaim_by_ret = false;
 		tr->nsecs_target = entry->swr->stime;
 		tr->ppa = kmalloc(sizeof(struct ppa), GFP_KERNEL);
@@ -561,12 +543,12 @@ static void __reclaim_completed_transactions(void)
 	int nchs = nvmev_vdev->nvmev_tsu->nchs;
 	int nchips = nvmev_vdev->nvmev_tsu->nchips;
 	unsigned int i, j;
+	unsigned int first_entry, last_entry, curr, nr_reclaimed;
 	for(i=0;i<nchs;i++){
 		for(j=0;j<nchips;j++){
-			unsigned int first_entry = -1;
-			unsigned int last_entry = -1;
-			unsigned int curr;
-			int nr_reclaimed = 0;
+			first_entry = -1;
+			last_entry = -1;
+			nr_reclaimed = 0;
 			chip_queue = &nvmev_vdev->nvmev_tsu->chip_queue[i][j];
 			
 			first_entry = chip_queue->io_seq;
@@ -601,8 +583,8 @@ static void __reclaim_completed_transactions(void)
 				chip_queue->nr_trs_in_fly -= nr_reclaimed;
 
 				spin_unlock(&chip_queue->tr_lock);
-				NVMEV_DEBUG("%s: recliam from chip_queue in channel-%d die-%d %u -- %u, reclaimed %d remain %u\n", __func__,
-						i, j, first_entry, last_entry, nr_reclaimed, chip_queue->nr_trs_in_fly);
+				// NVMEV_INFO("%s: recliam from chip_queue in channel-%d die-%d %u -- %u, reclaimed %d remain %u\n", __func__,
+				// 		i, j, first_entry, last_entry, nr_reclaimed, chip_queue->nr_trs_in_fly);
 			}
 		}
 	}
@@ -740,17 +722,17 @@ int nvmev_proc_io_sq(int sqid, int new_db, int old_db)
 	int seq;
 	int sq_entry = old_db;
 	int latest_db;
-	// int turn = sq->loop_turn;
-	// sq->loop_turn = (turn + 1) % sq->queue_size;
+	int turn = sq->loop_turn;
+	sq->loop_turn = (turn + 1) % 10086;
 
 	if (unlikely(!sq))
 		return old_db;
 	if (unlikely(num_proc < 0))
 		num_proc += sq->queue_size;
 
-	// if(num_proc < 20 && turn < 200) return old_db;
-	// sq->loop_turn = 0;
-	// NVMEV_INFO("sqid: %d, received %d requests\n", sqid, num_proc);
+	// if(num_proc < 10 && turn < 6000) return old_db;
+	sq->loop_turn = 0;
+	// NVMEV_INFO("sqid: %d, received %d requests, sq->queue_size %d\n", sqid, num_proc, sq->queue_size);
 	for (seq = 0; seq < num_proc; seq++) {
 		size_t io_size;
 		if (!__nvmev_proc_io(sqid, sq_entry, &io_size))
@@ -1051,6 +1033,20 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 	};
 	spin_lock_init(&nvmev_vdev->nvmev_tsu->ret_lock);
 	
+	// Initialize process queues for tsu.
+	nvmev_vdev->nvmev_tsu->process_queue = kzalloc(sizeof(struct nvmev_process_queue), GFP_KERNEL);
+	nvmev_vdev->nvmev_tsu->process_queue->queue = kzalloc(sizeof(struct transaction_entry) * NR_MAX_PROCESS_IO, GFP_KERNEL);
+	for( k = 0; k < NR_MAX_PROCESS_IO; k++){
+		nvmev_vdev->nvmev_tsu->process_queue->queue[k].next = k+1;
+		nvmev_vdev->nvmev_tsu->process_queue->queue[k].prev = k-1;
+	}
+	nvmev_vdev->nvmev_tsu->process_queue->queue[NR_MAX_PROCESS_IO-1].next = -1;
+	nvmev_vdev->nvmev_tsu->process_queue->nr_trs_in_fly = 0;
+	nvmev_vdev->nvmev_tsu->process_queue->free_seq = 0;
+	nvmev_vdev->nvmev_tsu->process_queue->free_seq_end = NR_MAX_PROCESS_IO-1;
+	nvmev_vdev->nvmev_tsu->process_queue->io_seq = -1;
+	nvmev_vdev->nvmev_tsu->process_queue->io_seq_end = -1;
+
 	// Initialize chip queues for tsu.
 	nvmev_vdev->nvmev_tsu->chip_queue = kzalloc(sizeof(struct nvmev_transaction_queue*) * nchs, GFP_KERNEL);
 	for( i = 0; i < nchs; i++){
@@ -1065,6 +1061,8 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue[NR_MAX_CHIP_IO-1].next = -1;
 			
 			spin_lock_init(&nvmev_vdev->nvmev_tsu->chip_queue[i][j].tr_lock);
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_exist_conflict_trs = 0;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_processed_trs = 0;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_trs_in_fly = 0;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_luns = LUNS_PER_CHIP;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_packages = 0;
@@ -1072,6 +1070,14 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].free_seq_end = NR_MAX_CHIP_IO-1;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].io_seq = -1;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].io_seq_end = -1;
+
+			// Initialize die queues for chip queue.
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].die_queues = kzalloc(sizeof(struct nvmev_die_queue) * nchips, GFP_KERNEL);
+			for( k = 0; k < nchips; k++ ){
+				nvmev_vdev->nvmev_tsu->chip_queue[i][j].die_queues[k].nr_transactions = 0;
+				INIT_LIST_HEAD(&nvmev_vdev->nvmev_tsu->chip_queue[i][j].die_queues[k].transactions_list);
+			}
+
 			INIT_LIST_HEAD(&nvmev_vdev->nvmev_tsu->chip_queue[i][j].transaction_package_list);
 		}
 	}
@@ -1086,7 +1092,7 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 }
 
 void NVMEV_TSU_FINAL(struct nvmev_dev *nvmev_vdev){
-	unsigned int i,j;
+	unsigned int i,j,k;
 	int nchs = NAND_CHANNELS;
     int nchips = CHIPS_PER_NAND_CH;
 
@@ -1097,6 +1103,7 @@ void NVMEV_TSU_FINAL(struct nvmev_dev *nvmev_vdev){
 	for(i=0;i<nchs;i++){
 		for(j=0;j<nchips;j++){
 			kfree(nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue);
+			kfree(nvmev_vdev->nvmev_tsu->chip_queue[i][j].die_queues);
 		}
 		kfree(nvmev_vdev->nvmev_tsu->chip_queue[i]);
 	}

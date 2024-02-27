@@ -45,6 +45,8 @@
 #define NR_MAX_IO_QUEUE 72
 #define NR_MAX_PARALLEL_IO 16384
 #define NR_MAX_CHIP_IO 2048
+#define NR_MAX_PROCESS_IO 1024
+
 
 #define NVMEV_INTX_IRQ 15
 
@@ -222,8 +224,11 @@ struct nvmev_tsu_tr {
 	uint64_t stime; /* Coperd: request arrival time */
 	uint64_t nsecs_target;
 	uint64_t estimated_alone_waiting_time;
+	uint64_t transfer_time, command_time;
 	bool interleave_pci_dma;
-	volatile bool  is_completed;
+	bool  is_completed;
+	bool is_copyed;
+
 	volatile bool is_reclaim_by_ret;
 	struct ppa *ppa;
 
@@ -231,8 +236,14 @@ struct nvmev_tsu_tr {
 	struct list_head list;
 };
 
+struct nvmev_die_queue {
+	unsigned int nr_transactions;
+	struct list_head transactions_list;
+};
+
 struct nvmev_transaction_queue {
 	struct nvmev_tsu_tr* queue;
+	// struct nvmev_tsu_tr* process_queue; /* receive transaction from queue for reorder */
 
 	spinlock_t tr_lock;
 	unsigned int free_seq; /* free io req head index */
@@ -241,9 +252,13 @@ struct nvmev_transaction_queue {
 	unsigned int io_seq_end; /* io req tail index */
 	unsigned int nr_trs_in_fly;
 	unsigned int nr_luns;
+	uint64_t nr_processed_trs;
+	uint64_t nr_exist_conflict_trs;
 	
 	// fairness
+	struct nvmev_die_queue *die_queues;
 	unsigned int nr_packages;
+	double fairness;
 	struct list_head transaction_package_list;
 };
 
@@ -262,6 +277,7 @@ struct nvmev_result_tsu {
 
 struct nvmev_tsu {
 	struct nvmev_transaction_queue** chip_queue; /*chip queue*/
+	struct nvmev_process_queue* process_queue; /* receive transaction from queue for reorder */
 	struct list_head ret_queue;
 	spinlock_t ret_lock;
 

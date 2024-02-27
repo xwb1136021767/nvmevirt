@@ -8,9 +8,9 @@ group_reporting
 zonemode=zbd
 
 [writeprepare]
-size=1G
+size=100M
 iodepth=1
-numjobs=8
+numjobs=1
 offset_increment=32z
-max_open_zones=10
+max_open_zones=30
 
