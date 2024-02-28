@@ -462,6 +462,33 @@ void traverse_tmp_queue(
 		NVMEV_INFO("======================traverse-tmp_queue-after======================\n");
 }
 
+bool fine_ture_unfair_transactions(
+	struct list_head* tmp_queue,
+	unsigned int flow_with_max_average_slowdown
+){
+	struct nvme_tsu_tr_list_entry *entry, *last_entry = NULL;
+    struct list_head *next_pos;
+
+    list_for_each_entry(entry, tmp_queue, list) {
+        if (entry->sqid == flow_with_max_average_slowdown) {
+            last_entry = entry;
+        }
+    }
+
+    if (last_entry) {
+        next_pos = last_entry->list.next;
+
+        if (next_pos != tmp_queue) {
+			list_del(&last_entry->list);
+            list_add(&last_entry->list, next_pos);
+			return false;
+        } else {
+            return true;
+        }
+    }
+	return true;
+}
+
 void reorder_for_fairness(
 		struct nvmev_transaction_queue* chip_queue,
 		struct list_head* tmp_queue, 
@@ -474,6 +501,8 @@ void reorder_for_fairness(
 		 * */ 
 	struct nvmev_tsu_tr* tr = &chip_queue->queue[curr];
 	struct nvme_tsu_tr_list_entry *entry;
+	unsigned int flow_with_max_average_slowdown_after_fineture;;
+	bool stop = false;
 
 	traverse_tmp_queue(chip_queue, tmp_queue, true);
 	if(tr->sqid == flow_with_max_average_slowdown){
@@ -491,6 +520,14 @@ void reorder_for_fairness(
 	}
 
 	update_waiting_time(chip_queue, tmp_queue);
+	fairness_based_on_average_slowdown(chip_queue, tmp_queue, curr, &flow_with_max_average_slowdown_after_fineture);
+	while(!stop && flow_with_max_average_slowdown_after_fineture != flow_with_max_average_slowdown){
+		stop = fine_ture_unfair_transactions(tmp_queue, flow_with_max_average_slowdown);
+		update_waiting_time(chip_queue, tmp_queue);
+		fairness_based_on_average_slowdown(chip_queue, tmp_queue, curr, &flow_with_max_average_slowdown_after_fineture);
+	}
+	
+
 	traverse_tmp_queue(chip_queue, tmp_queue, false);
 }
 
@@ -540,6 +577,7 @@ void get_transaction_packages_without_zone_conflict(struct nvmev_transaction_que
 			.chip = chip,
 			.die = die,
 			.entry = curr,
+			.sqid = tr->sqid,
 			.is_copyed = false,
 			.estimated_alone_waiting_time = tr->estimated_alone_waiting_time,
 			.list = LIST_HEAD_INIT(tr_tmp->list),
@@ -573,7 +611,12 @@ void get_transaction_packages_without_zone_conflict(struct nvmev_transaction_que
 		tr_entry = entry->entry;
 		insert_to_die_queue(&chip_queue->die_queues[die], channel, chip, die, tr_entry);
 	}
-	
+
+	// 5. CLear tmp-queue.
+	list_for_each_entry_safe(entry, tmp, &tmp_queue, list) {
+        list_del(&entry->list);
+        kfree(entry);
+    }
 }
 
 void delete_node(struct nvmev_transaction_queue* chip_queue, unsigned int node) {

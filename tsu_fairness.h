@@ -17,6 +17,7 @@ struct nvme_tsu_tr_list_entry{
     unsigned int chip;
     unsigned int entry;
     int die;
+    unsigned int sqid;
 
     uint64_t estimated_alone_waiting_time;
     bool is_copyed;
