@@ -3,9 +3,6 @@ rw=write
 direct=1
 group_reporting=1
 thread=1
-time_based=1
-ramp_time=10s
-runtime=20s
 size=16z
 zonemode=zbd
 max_open_zones=256
@@ -13,7 +10,6 @@ ioengine=io_uring
 fixedbufs=1
 registerfiles=1
 fixedbufs=1
-sqthread_poll=1
 filename=/dev/nvme0n1
 
 [qd128]

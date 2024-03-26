@@ -1,0 +1,16 @@
+[global]
+ioengine=io_uring
+direct=1
+time_based
+runtime=30
+numjobs=1
+ioscheduler=none
+thread
+
+[rand_write]
+filename=/dev/nvme0n1
+rw=randwrite
+bs=4k
+size=1G
+iodepth=64
+stonewall

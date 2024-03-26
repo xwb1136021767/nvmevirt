@@ -241,6 +241,22 @@ struct nvmev_die_queue {
 	struct list_head transactions_list;
 };
 
+struct nvmev_transaction_queue_statistics{
+	uint64_t nr_processed_trs;
+	uint64_t total_waiting_times;
+	uint64_t avg_waiting_times;
+	uint64_t max_waiting_times;
+	unsigned int max_queue_length;
+	unsigned int num_of_scheduling;
+	
+	double before_reorder_max_slowdown;
+	double after_reorder_max_slowdown;
+	double total_after_reorder_fairness;
+	double total_before_reorder_fairness;
+	double avg_before_reorder_fairness;
+	double avg_after_reorder_fairness;
+};
+
 struct nvmev_transaction_queue {
 	struct nvmev_tsu_tr* queue;
 	// struct nvmev_tsu_tr* process_queue; /* receive transaction from queue for reorder */
@@ -252,14 +268,13 @@ struct nvmev_transaction_queue {
 	unsigned int io_seq_end; /* io req tail index */
 	unsigned int nr_trs_in_fly;
 	unsigned int nr_luns;
+	unsigned int nr_planes;
 	uint64_t nr_processed_trs;
 	uint64_t nr_exist_conflict_trs;
 	
 	// fairness
 	struct nvmev_die_queue *die_queues;
-	unsigned int nr_packages;
-	double fairness;
-	struct list_head transaction_package_list;
+	struct nvmev_transaction_queue_statistics queue_probe;
 };
 
 struct nvmev_result_tsu {
@@ -275,12 +290,42 @@ struct nvmev_result_tsu {
 	struct list_head list;
 };
 
+struct nvmev_zone_info{
+	uint32_t zid;
+	unsigned int nr_transactions;
+	struct list_head* pos_head;
+	struct list_head* pos_tail;
+
+	struct list_head list;
+};
+
+struct nvmev_workload_local_info{
+	unsigned int channel;
+	unsigned int chip;
+	unsigned int die;
+	unsigned int nr_transactions_in_die_queue;
+	double local_slowdown;
+
+	struct list_head zone_infos;
+	struct list_head list;
+};
+
+struct nvmev_workload_global_info{
+	unsigned int sqid;
+	unsigned int nr_processed;
+	double global_slowdown;
+
+	struct list_head local_infos;
+	struct list_head list;
+};
+
 struct nvmev_tsu {
 	struct nvmev_transaction_queue** chip_queue; /*chip queue*/
 	struct nvmev_process_queue* process_queue; /* receive transaction from queue for reorder */
 	struct list_head ret_queue;
-	spinlock_t ret_lock;
+	struct list_head workload_infos; /* global workload info */
 
+	spinlock_t ret_lock;
 	unsigned long long latest_nsecs;
 	unsigned int id;
 	int nchs;

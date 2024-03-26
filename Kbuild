@@ -1,10 +1,10 @@
 # Select one of the targets to build
 #CONFIG_NVMEVIRT_NVM := y
-#CONFIG_NVMEVIRT_SSD := y
+# CONFIG_NVMEVIRT_SSD := y
 CONFIG_NVMEVIRT_ZNS := y
 #CONFIG_NVMEVIRT_KV := y
 
-FPU_CFLAGS += -mhard-float
+FPU_CFLAGS += -msoft-float
 FPU_CFLAGS += -msse -msse2
 
 obj-m   := nvmev.o
@@ -22,7 +22,8 @@ ccflags-$(CONFIG_NVMEVIRT_ZNS) += -DBASE_SSD=WD_ZN540
 #ccflags-$(CONFIG_NVMEVIRT_ZNS) += -DBASE_SSD=ZNS_PROTOTYPE
 ccflags-$(CONFIG_NVMEVIRT_ZNS) += -Wno-implicit-fallthrough
 ccflags-$(CONFIG_NVMEVIRT_ZNS)+= $(FPU_CFLAGS)
-nvmev-$(CONFIG_NVMEVIRT_ZNS) += ssd.o zns_ftl.o zns_read_write.o zns_mgmt_send.o zns_mgmt_recv.o channel_model.o tsu_fifo.o tsu_fairness.o
+nvmev-$(CONFIG_NVMEVIRT_ZNS) += ssd.o zns_ftl.o zns_read_write.o zns_mgmt_send.o zns_mgmt_recv.o channel_model.o tsu_fifo.o tsu_fairness.o tsu_fairzns.o
+# nvmev-$(CONFIG_NVMEVIRT_ZNS) += ssd.o zns_ftl.o zns_read_write.o zns_mgmt_send.o zns_mgmt_recv.o channel_model.o tsu_fifo.o
 
 ccflags-$(CONFIG_NVMEVIRT_KV) += -DBASE_SSD=KV_PROTOTYPE
 nvmev-$(CONFIG_NVMEVIRT_KV) += kv_ftl.o append_only.o bitmap.o

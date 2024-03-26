@@ -279,31 +279,6 @@ static bool __zns_write(struct zns_ftl *zns_ftl, struct nvmev_request *req,
 			
 			NVMEV_DEBUG("Split req(slba 0x%llx nr_lba 0x%lld  zid %d) to tr (zid: %u lpn: %lld pg_off: %lld pgs: %lld)\n",
 						slba, nr_lba, zid, zid, lpn, pg_off, pgs);
-			// struct nand_cmd swr = {
-			// 	.type = USER_IO,
-			// 	.cmd = NAND_WRITE,
-			// 	.stime = nsecs_xfer_completed,
-			// 	.xfer_size = spp->pgs_per_oneshotpg * spp->pgsz,
-			// 	.interleave_pci_dma = false,
-			// 	.ppa = &ppa,
-			// };
-
-			// size_t bufs_to_release;
-			// uint32_t unaligned_space =
-			// 	zns_ftl->zp.zone_size % (spp->pgs_per_oneshotpg * spp->pgsz);
-			// uint64_t nsecs_completed = ssd_advance_nand(zns_ftl->ssd, &swr);
-
-			// nsecs_latest = max(nsecs_completed, nsecs_latest);
-			// NVMEV_ZNS_DEBUG("%s Flush slba 0x%llx nr_lba 0x%lx zone_id %d state %d\n",
-			// 		__func__, slba, nr_lba, zid, state);
-
-			// if (((lpn + pgs - 1) == zone_elpn) && (unaligned_space > 0))
-			// 	bufs_to_release = unaligned_space;
-			// else
-			// 	bufs_to_release = spp->pgs_per_oneshotpg * spp->pgsz;
-
-			// schedule_internal_operation(req->sq_id, nsecs_completed, write_buffer,
-			// 			    bufs_to_release);
 		}
 	}
 

@@ -10,6 +10,7 @@
 #include "ssd_config.h"
 #include "tsu_fifo.h"
 #include "tsu_fairness.h"
+#include "tsu_fairzns.h"
 #if (SUPPORTED_SSD_TYPE(CONV) || SUPPORTED_SSD_TYPE(ZNS))
 #include "ssd.h"
 #else
@@ -1023,6 +1024,8 @@ static int nvmev_tsu(void *data){
 void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
     int nchs = NAND_CHANNELS;
     int nchips = CHIPS_PER_NAND_CH;
+	int nluns = LUNS_PER_CHIP;
+	int nplanes = PLNS_PER_LUN;
 	unsigned int i, j, k;
 
 	nvmev_vdev->nvmev_tsu = kcalloc(sizeof(struct nvmev_tsu), 1, GFP_KERNEL);
@@ -1030,6 +1033,7 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 		.nchs = nchs,
 		.nchips = nchips,
 		.ret_queue = LIST_HEAD_INIT(nvmev_vdev->nvmev_tsu->ret_queue),
+		.workload_infos = LIST_HEAD_INIT(nvmev_vdev->nvmev_tsu->workload_infos),
 	};
 	spin_lock_init(&nvmev_vdev->nvmev_tsu->ret_lock);
 	
@@ -1064,12 +1068,22 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_exist_conflict_trs = 0;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_processed_trs = 0;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_trs_in_fly = 0;
-			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_luns = LUNS_PER_CHIP;
-			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_packages = 0;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_luns = nluns;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].free_seq = 0;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].free_seq_end = NR_MAX_CHIP_IO-1;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].io_seq = -1;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].io_seq_end = -1;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_planes = nplanes;
+			
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.avg_after_reorder_fairness = 0.0;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.avg_before_reorder_fairness = 0.0;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.avg_waiting_times = 0;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.max_queue_length = 0;
+			// nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.max_slowdown = 0.0;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.max_waiting_times = 0;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.nr_processed_trs = 0;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.total_waiting_times = 0;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.num_of_scheduling = 0;
 
 			// Initialize die queues for chip queue.
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].die_queues = kzalloc(sizeof(struct nvmev_die_queue) * nchips, GFP_KERNEL);
@@ -1077,14 +1091,13 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 				nvmev_vdev->nvmev_tsu->chip_queue[i][j].die_queues[k].nr_transactions = 0;
 				INIT_LIST_HEAD(&nvmev_vdev->nvmev_tsu->chip_queue[i][j].die_queues[k].transactions_list);
 			}
-
-			INIT_LIST_HEAD(&nvmev_vdev->nvmev_tsu->chip_queue[i][j].transaction_package_list);
 		}
 	}
 
 	// Initilize schedule method for tsu.
 	nvmev_vdev->nvmev_tsu->schedule = schedule_fairness;
 	// nvmev_vdev->nvmev_tsu->schedule = schedule_fifo;
+	// nvmev_vdev->nvmev_tsu->schedule = schedule_fairzns;
 	nvmev_vdev->nvmev_tsu->task_struct = kthread_create(nvmev_tsu, nvmev_vdev->nvmev_tsu, "nvmev_tsu");
 	if (nvmev_vdev->config.cpu_nr_dispatcher != -1)
 		kthread_bind(nvmev_vdev->nvmev_tsu->task_struct, nvmev_vdev->config.cpu_nr_tsu);
@@ -1102,11 +1115,13 @@ void NVMEV_TSU_FINAL(struct nvmev_dev *nvmev_vdev){
 
 	for(i=0;i<nchs;i++){
 		for(j=0;j<nchips;j++){
+			print_queue_statistics(&nvmev_vdev->nvmev_tsu->chip_queue[i][j], i, j);
 			kfree(nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue);
 			kfree(nvmev_vdev->nvmev_tsu->chip_queue[i][j].die_queues);
 		}
 		kfree(nvmev_vdev->nvmev_tsu->chip_queue[i]);
 	}
+	clear_workload_infos(&nvmev_vdev->nvmev_tsu->workload_infos);
 	kfree(nvmev_vdev->nvmev_tsu->chip_queue);
 	kfree(nvmev_vdev->nvmev_tsu);
 }

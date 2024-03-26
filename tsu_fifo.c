@@ -1,5 +1,6 @@
 #include "tsu_fifo.h"
 
+
 void schedule_fifo(struct nvmev_tsu* tsu){
     unsigned int i,j;
     for(i=0;i<tsu->nchs;i++){
@@ -14,6 +15,10 @@ void schedule_fifo(struct nvmev_tsu* tsu){
                 if(tr->is_completed){
                     curr = tr->next;
                     continue;
+                }
+
+                if(!is_lun_avail(tr)){
+                    break;
                 }
 
                 NVMEV_DEBUG("BIN:  process tr from ch: %d lun: %d zid: %d, curr = %d ,io_seq=%d, io_seq_end=%d\n", 

@@ -1,0 +1,17 @@
+[global]
+direct=1
+group_reporting=1
+zonemode=zbd
+ioengine=libaio
+ioscheduler=mq-deadline
+max_open_zones=256
+
+[write]
+filename=/dev/nvme0n1
+rw=write
+iodepth=512
+size=6z
+numjobs=16
+bs=32k
+offset_increment=1z
+job_max_open_zones=1

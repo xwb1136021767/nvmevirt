@@ -1,0 +1,17 @@
+[global]
+direct=1
+group_reporting=1
+thread=1
+zonemode=zbd
+ioengine=libaio
+sqthread_poll=1
+ioscheduler=none
+max_open_zones=256
+
+[rand_read]
+filename=/dev/nvme0n1
+rw=randread
+iodepth=1024
+numjobs=1
+bs=4k
+offset_increment=1z
