@@ -1038,18 +1038,31 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 	spin_lock_init(&nvmev_vdev->nvmev_tsu->ret_lock);
 	
 	// Initialize process queues for tsu.
-	nvmev_vdev->nvmev_tsu->process_queue = kzalloc(sizeof(struct nvmev_process_queue), GFP_KERNEL);
-	nvmev_vdev->nvmev_tsu->process_queue->queue = kzalloc(sizeof(struct transaction_entry) * NR_MAX_PROCESS_IO, GFP_KERNEL);
+	nvmev_vdev->nvmev_tsu->process_queue_read = kzalloc(sizeof(struct nvmev_process_queue), GFP_KERNEL);
+	nvmev_vdev->nvmev_tsu->process_queue_read->queue = kzalloc(sizeof(struct transaction_entry) * NR_MAX_PROCESS_IO, GFP_KERNEL);
 	for( k = 0; k < NR_MAX_PROCESS_IO; k++){
-		nvmev_vdev->nvmev_tsu->process_queue->queue[k].next = k+1;
-		nvmev_vdev->nvmev_tsu->process_queue->queue[k].prev = k-1;
+		nvmev_vdev->nvmev_tsu->process_queue_read->queue[k].next = k+1;
+		nvmev_vdev->nvmev_tsu->process_queue_read->queue[k].prev = k-1;
 	}
-	nvmev_vdev->nvmev_tsu->process_queue->queue[NR_MAX_PROCESS_IO-1].next = -1;
-	nvmev_vdev->nvmev_tsu->process_queue->nr_trs_in_fly = 0;
-	nvmev_vdev->nvmev_tsu->process_queue->free_seq = 0;
-	nvmev_vdev->nvmev_tsu->process_queue->free_seq_end = NR_MAX_PROCESS_IO-1;
-	nvmev_vdev->nvmev_tsu->process_queue->io_seq = -1;
-	nvmev_vdev->nvmev_tsu->process_queue->io_seq_end = -1;
+	nvmev_vdev->nvmev_tsu->process_queue_read->queue[NR_MAX_PROCESS_IO-1].next = -1;
+	nvmev_vdev->nvmev_tsu->process_queue_read->nr_trs_in_fly = 0;
+	nvmev_vdev->nvmev_tsu->process_queue_read->free_seq = 0;
+	nvmev_vdev->nvmev_tsu->process_queue_read->free_seq_end = NR_MAX_PROCESS_IO-1;
+	nvmev_vdev->nvmev_tsu->process_queue_read->io_seq = -1;
+	nvmev_vdev->nvmev_tsu->process_queue_read->io_seq_end = -1;
+
+	nvmev_vdev->nvmev_tsu->process_queue_write = kzalloc(sizeof(struct nvmev_process_queue), GFP_KERNEL);
+	nvmev_vdev->nvmev_tsu->process_queue_write->queue = kzalloc(sizeof(struct transaction_entry) * NR_MAX_PROCESS_IO, GFP_KERNEL);
+	for( k = 0; k < NR_MAX_PROCESS_IO; k++){
+		nvmev_vdev->nvmev_tsu->process_queue_write->queue[k].next = k+1;
+		nvmev_vdev->nvmev_tsu->process_queue_write->queue[k].prev = k-1;
+	}
+	nvmev_vdev->nvmev_tsu->process_queue_write->queue[NR_MAX_PROCESS_IO-1].next = -1;
+	nvmev_vdev->nvmev_tsu->process_queue_write->nr_trs_in_fly = 0;
+	nvmev_vdev->nvmev_tsu->process_queue_write->free_seq = 0;
+	nvmev_vdev->nvmev_tsu->process_queue_write->free_seq_end = NR_MAX_PROCESS_IO-1;
+	nvmev_vdev->nvmev_tsu->process_queue_write->io_seq = -1;
+	nvmev_vdev->nvmev_tsu->process_queue_write->io_seq_end = -1;
 
 	// Initialize chip queues for tsu.
 	nvmev_vdev->nvmev_tsu->chip_queue = kzalloc(sizeof(struct nvmev_transaction_queue*) * nchs, GFP_KERNEL);
@@ -1074,9 +1087,15 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].io_seq = -1;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].io_seq_end = -1;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].nr_planes = nplanes;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].channel = i;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].chip = j;
 			
-			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.avg_after_reorder_fairness = 0.0;
-			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.avg_before_reorder_fairness = 0.0;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.max_slowdown = DBL_MIN;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.min_slowdown = DBL_MAX;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.max_fairness = DBL_MIN;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.min_fairness = DBL_MAX;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.sum_fairness = 0.0;
+			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.avg_fairness = 0.0;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.avg_waiting_times = 0;
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.max_queue_length = 0;
 			// nvmev_vdev->nvmev_tsu->chip_queue[i][j].queue_probe.max_slowdown = 0.0;
@@ -1089,6 +1108,7 @@ void NVMEV_TSU_INIT(struct nvmev_dev *nvmev_vdev) {
 			nvmev_vdev->nvmev_tsu->chip_queue[i][j].die_queues = kzalloc(sizeof(struct nvmev_die_queue) * nchips, GFP_KERNEL);
 			for( k = 0; k < nchips; k++ ){
 				nvmev_vdev->nvmev_tsu->chip_queue[i][j].die_queues[k].nr_transactions = 0;
+				nvmev_vdev->nvmev_tsu->chip_queue[i][j].die_queues[k].nr_workloads = 0;
 				INIT_LIST_HEAD(&nvmev_vdev->nvmev_tsu->chip_queue[i][j].die_queues[k].transactions_list);
 			}
 		}
@@ -1123,5 +1143,7 @@ void NVMEV_TSU_FINAL(struct nvmev_dev *nvmev_vdev){
 	}
 	clear_workload_infos(&nvmev_vdev->nvmev_tsu->workload_infos);
 	kfree(nvmev_vdev->nvmev_tsu->chip_queue);
+	kfree(nvmev_vdev->nvmev_tsu->process_queue_read);
+	kfree(nvmev_vdev->nvmev_tsu->process_queue_write);
 	kfree(nvmev_vdev->nvmev_tsu);
 }

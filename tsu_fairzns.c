@@ -19,7 +19,7 @@ double fairness_based_on_local_slowdown(
 	int stream_count = 0;
 	struct stream_data* data;
 	uint64_t tr_execute_time;
-	struct nvme_tsu_tr_list_entry *entry, *tmp;
+	struct die_queue_entry *entry, *tmp;
 	unsigned int tr_entry;
 	uint64_t transaction_alone_time, transaction_shared_time;
 	spp = &ssd->sp;
@@ -75,7 +75,7 @@ bool fine_ture_unfair_transactions_fairzns(
 	struct list_head* tmp_queue,
 	unsigned int flow_with_max_average_slowdown
 ){
-	struct nvme_tsu_tr_list_entry *entry, *last_entry = NULL;
+	struct die_queue_entry *entry, *last_entry = NULL;
     struct list_head *next_pos;
 
     list_for_each_entry(entry, tmp_queue, list) {
@@ -105,7 +105,7 @@ void reorder_for_fairness_fairzns(
 		unsigned int curr
 	){
 	struct nvmev_tsu_tr* tr = &chip_queue->queue[curr];
-	struct nvme_tsu_tr_list_entry *entry;
+	struct die_queue_entry *entry;
 	unsigned int flow_with_max_average_slowdown_after_fineture;
 	bool is_tail = false;
 
@@ -149,7 +149,7 @@ void fairzns(
 	double fairness = 0.0;
 	unsigned int fairness_show = 0;
 	unsigned int idx = 0;
-	struct nvme_tsu_tr_list_entry *entry, *tmp;
+	struct die_queue_entry *entry, *tmp;
 	LIST_HEAD(tmp_queue);
 
 	if(curr == -1) return;
@@ -169,8 +169,8 @@ void fairzns(
 		estimate_alone_waiting_time(chip_queue, curr, &tmp_queue);
 
 		// 1. 插入到tmp-queue
-		struct nvme_tsu_tr_list_entry *tr_tmp = kzalloc(sizeof(struct nvme_tsu_tr_list_entry), GFP_KERNEL);
-		*tr_tmp = (struct nvme_tsu_tr_list_entry){
+		struct die_queue_entry *tr_tmp = kzalloc(sizeof(struct die_queue_entry), GFP_KERNEL);
+		*tr_tmp = (struct die_queue_entry){
 			.channel = channel,
 			.chip = chip,
 			.die = die,
@@ -225,7 +225,7 @@ void schedule_fairzns(struct nvmev_tsu* tsu){
 	unsigned int flow_with_max_average_slowdown = 0;
 	uint64_t delta = 0;
 	struct nvmev_transaction_queue* chip_queue;
-	struct nvmev_process_queue* process_queue = tsu->process_queue;
+	struct nvmev_process_queue* process_queue = tsu->process_queue_write;
 	struct nvmev_tsu_tr* tr;
 	struct transaction_entry* tr_process;
 	struct nvmev_ns *ns;

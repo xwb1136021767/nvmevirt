@@ -40,6 +40,9 @@ struct stream_data {
     int stream_id;
     double slow_down;
     unsigned int transaction_count;
+	unsigned int channel;
+	unsigned int chip;
+	unsigned int die;
     // other data fields...
     struct list_head list;
 };
@@ -68,9 +71,11 @@ struct die_queue_entry {
     unsigned int channel;
     unsigned int chip;
     unsigned int entry;
-    unsigned int idx;
     int die;
     bool is_copyed;
+	uint64_t estimated_alone_waiting_time;
+    uint64_t transfer_time;
+    uint64_t command_time;
 
     struct list_head list;
 };
@@ -172,11 +177,11 @@ static void move_forward(
 
 
 // operations for struct nvme_tsu_tr_list_entry.
-static struct nvme_tsu_tr_list_entry* find_nvme_tsu_tr_list_entry(
+static struct die_queue_entry* find_die_entry(
 	struct list_head* tr_list,
 	unsigned int sqid
 ){
-	struct nvme_tsu_tr_list_entry *entry, *result = NULL;
+	struct die_queue_entry *entry, *result = NULL;
 	list_for_each_entry(entry, tr_list, list){
 		if(entry->sqid == sqid){
 			result = entry;
@@ -186,11 +191,11 @@ static struct nvme_tsu_tr_list_entry* find_nvme_tsu_tr_list_entry(
 	return result;
 }
 
-static struct nvme_tsu_tr_list_entry* find_nvme_tsu_tr_list_entry_reverse(
+static struct die_queue_entry* find_die_entry_reverse(
 	struct list_head* tr_list,
 	unsigned int sqid
 ){
-	struct nvme_tsu_tr_list_entry *entry, *result = NULL;
+	struct die_queue_entry *entry, *result = NULL;
 	list_for_each_entry_reverse(entry, tr_list, list){
 		if(entry->sqid == sqid){
 			result = entry;
@@ -200,8 +205,8 @@ static struct nvme_tsu_tr_list_entry* find_nvme_tsu_tr_list_entry_reverse(
 	return result;
 }
 
-static void clear_nvme_tsu_tr_list_entry(struct list_head* tr_list){
-	struct nvme_tsu_tr_list_entry *entry, *tmp;
+static void clear_die_entry(struct list_head* tr_list){
+	struct die_queue_entry *entry, *tmp;
 	list_for_each_entry_safe(entry, tmp, tr_list, list) {
         list_del(&entry->list);
         kfree(entry);
@@ -256,6 +261,7 @@ static void display_chip_queue(struct nvmev_transaction_queue* chip_queue){
 static void print_process_queue(struct nvmev_process_queue* process_queue) {
 	unsigned int curr = process_queue->io_seq;
 	struct transaction_entry* tr;
+	if(curr == -1) return;
 	NVMEV_INFO("------process_queue begin-------------");
 	while(curr != -1) {
 		tr = &process_queue->queue[curr];
@@ -279,12 +285,11 @@ static void print_queue_statistics(struct nvmev_transaction_queue* chip_queue, i
 	NVMEV_INFO("**********chip-queue(channel: %d, chip: %d) statistics*************", channel, chip);
 
 	NVMEV_INFO("num_of_scheduling: %d\n", chip_queue->queue_probe.num_of_scheduling);
-	NVMEV_INFO("total_after_reorder_fairness: %d\n", (unsigned int)chip_queue->queue_probe.total_after_reorder_fairness*1000);
-	NVMEV_INFO("total_before_reorder_fairness: %d\n", (unsigned int)chip_queue->queue_probe.total_before_reorder_fairness*1000);
-	NVMEV_INFO("avg_before_reorder_fairness: %d\n", (unsigned int)chip_queue->queue_probe.avg_before_reorder_fairness);
-	NVMEV_INFO("avg_after_reorder_fairness: %d\n", (unsigned int)chip_queue->queue_probe.avg_after_reorder_fairness);
-	NVMEV_INFO("before_reorder_max_slowdown: %d\n", (unsigned int)chip_queue->queue_probe.before_reorder_max_slowdown*1000);
-	NVMEV_INFO("after_reorder_max_slowdown: %d\n", (unsigned int)chip_queue->queue_probe.after_reorder_max_slowdown*1000);
+	NVMEV_INFO("max_slowdown: %d\n", (unsigned int)chip_queue->queue_probe.max_slowdown*1000);
+	// NVMEV_INFO("min_slowdown: %d\n", (unsigned int)chip_queue->queue_probe.min_slowdown*1000);
+	NVMEV_INFO("max_fairness: %d\n", (unsigned int)chip_queue->queue_probe.max_fairness);
+	NVMEV_INFO("min_fairness: %d\n", (unsigned int)chip_queue->queue_probe.min_fairness);
+	NVMEV_INFO("avg_fairness: %d\n", (unsigned int)chip_queue->queue_probe.avg_fairness);
 	NVMEV_INFO("avg_waiting_times: %lld\n", chip_queue->queue_probe.avg_waiting_times);
 	NVMEV_INFO("max_waiting_times: %lld\n", chip_queue->queue_probe.max_waiting_times);
 	NVMEV_INFO("max_queue_length: %d\n", chip_queue->queue_probe.max_queue_length);
@@ -430,8 +435,8 @@ static struct nvmev_process_queue* __alloc_process_queue_entry(struct nvmev_proc
         tr->next = first_entry;
 
         process_queue->free_seq_end = last_entry;
-        NVMEV_INFO("%s: %u -- %u, %d\n", __func__,
-                first_entry, last_entry, nr_reclaimed);
+        // NVMEV_INFO("%s: %u -- %u, %d\n", __func__,
+        //         first_entry, last_entry, nr_reclaimed);
     }
 }
 
@@ -457,7 +462,7 @@ static void copy_to_process_queue(struct nvmev_transaction_queue* chip_queue, st
 		die = tr->ppa->g.lun;
 		
 		// estimate_alone_waiting_time(chip_queue, curr);
-		NVMEV_INFO("In die-%d queue, entry : %d, estimated_alone_waiting_time = %lld\n", die, entry, tr->estimated_alone_waiting_time);
+		// NVMEV_INFO("In die-%d queue, entry : %d, estimated_alone_waiting_time = %lld\n", die, entry, tr->estimated_alone_waiting_time);
 		__enqueue_transaction_to_process_queue(process_queue, curr, channel, chip, die);
 		// spin_lock(&chip_queue->tr_lock);
 		tr->is_copyed = true;

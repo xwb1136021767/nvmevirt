@@ -10,6 +10,8 @@ ioengine=io_uring
 fixedbufs=1
 registerfiles=1
 fixedbufs=1
+time_based=1
+runtime=10s
 filename=/dev/nvme0n1
 
 [qd128]

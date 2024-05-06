@@ -1,5 +1,6 @@
 #ifndef _NVMEVIRT_NVMEV_COMPUTE_FAIRNESS_H
 #define _NVMEVIRT_NVMEV_COMPUTE_FAIRNESS_H
+#include <linux/math64.h>
 #include <float.h>
 #include "nvmev_tsh.h"
 
@@ -125,14 +126,31 @@ static uint64_t estimate_transaction_command_time(struct nvmev_tsu_tr* tr, struc
 	return command_time;
 }
 
+static void compute_transfer_and_command_time(
+	struct nvmev_transaction_queue* chip_queue,
+	struct nvmev_tsu_tr* tr
+){
+    struct nvmev_ns *ns = &nvmev_vdev->ns[tr->nsid];
+    struct zns_ftl *zns_ftl = (struct zns_ftl *)ns->ftls;
+    struct nand_lun *lun;
+	struct ssd_channel *ch;
+    struct ppa *ppa = tr->ppa;
+    struct ssdparams *spp;
+    struct ssd *ssd = zns_ftl->ssd;
+	spp = &ssd->sp;
+	
+	tr->transfer_time = estimate_transaction_transfer_time(tr, spp, ssd);
+	tr->command_time = estimate_transaction_command_time(tr, spp, ssd);
+}
+
 static void estimate_alone_waiting_time(
 	struct nvmev_transaction_queue* chip_queue,
 	int curr,
-	struct list_head* tmp_queue
+	struct list_head* die_queue
 )
 {
 	uint64_t chip_busy_time=0, expected_last_time=0;
-    unsigned int start = chip_queue->io_seq, end = chip_queue->io_seq_end;
+    
 
     struct nvmev_tsu_tr* tr = &chip_queue->queue[curr];
     struct nvmev_ns *ns = &nvmev_vdev->ns[tr->nsid];
@@ -148,9 +166,8 @@ static void estimate_alone_waiting_time(
     uint64_t remaining, xfer_size, transfer_time, command_time;
     int c = tr->cmd;
 	unsigned int die;
-	struct die_queue_entry *die_entry;
 	struct list_head *die_lists[chip_queue->nr_luns];
-	struct nvme_tsu_tr_list_entry *tr_tmp, *entry;
+	struct die_queue_entry *tr_tmp, *entry;
     spp = &ssd->sp;
     lun = get_lun(ssd, ppa);
 	ch = get_ch(ssd, ppa);
@@ -164,7 +181,7 @@ static void estimate_alone_waiting_time(
 
 	// 遍历tmp-queue，计算curr的estimated_alone_waiting_time
     // 反向遍历tmp-queue，找到最后一个具有相同sqid的事务即可
-	list_for_each_entry_reverse(entry, tmp_queue, list){
+	list_for_each_entry_reverse(entry, die_queue, list){
 		tmp = &chip_queue->queue[entry->entry];
 		if(tmp->sqid == tr->sqid){
 			transfer_time = tmp->transfer_time;
@@ -185,7 +202,7 @@ static void update_estimated_alone_waiting_time(
 	struct nvmev_transaction_queue* chip_queue,
 	struct list_head* tmp_queue
 ){
-	struct nvme_tsu_tr_list_entry *entry, *tmp, *data;
+	struct die_queue_entry *entry, *tmp, *data;
 	unsigned int tr_entry;
 	struct nvmev_tsu_tr* tr;
 	LIST_HEAD(prev_estimated_alone_waiting_time);
@@ -194,7 +211,7 @@ static void update_estimated_alone_waiting_time(
 		tr_entry = entry->entry;
 		tr = &chip_queue->queue[tr_entry];
 
-		data = find_nvme_tsu_tr_list_entry(&prev_estimated_alone_waiting_time, entry->sqid);
+		data = find_die_entry(&prev_estimated_alone_waiting_time, entry->sqid);
 		if(data){
 			entry->estimated_alone_waiting_time = data->estimated_alone_waiting_time + data->transfer_time + data->command_time;
 			data->estimated_alone_waiting_time = entry->estimated_alone_waiting_time;
@@ -202,8 +219,8 @@ static void update_estimated_alone_waiting_time(
 			data->command_time = entry->command_time;
 		}else{
 			entry->estimated_alone_waiting_time = 0;
-			data = kmalloc(sizeof(struct nvme_tsu_tr_list_entry), GFP_KERNEL);
-			*data = (struct nvme_tsu_tr_list_entry){
+			data = kmalloc(sizeof(struct die_queue_entry), GFP_KERNEL);
+			*data = (struct die_queue_entry){
 				.sqid = entry->sqid,
 				.estimated_alone_waiting_time = 0,
 				.transfer_time = entry->transfer_time,
@@ -213,7 +230,7 @@ static void update_estimated_alone_waiting_time(
 		}
 	}
 
-	clear_nvme_tsu_tr_list_entry(&prev_estimated_alone_waiting_time);
+	clear_die_entry(&prev_estimated_alone_waiting_time);
 }
 
 

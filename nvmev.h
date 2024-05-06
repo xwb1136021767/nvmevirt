@@ -238,6 +238,7 @@ struct nvmev_tsu_tr {
 
 struct nvmev_die_queue {
 	unsigned int nr_transactions;
+	unsigned int nr_workloads;
 	struct list_head transactions_list;
 };
 
@@ -249,12 +250,12 @@ struct nvmev_transaction_queue_statistics{
 	unsigned int max_queue_length;
 	unsigned int num_of_scheduling;
 	
-	double before_reorder_max_slowdown;
-	double after_reorder_max_slowdown;
-	double total_after_reorder_fairness;
-	double total_before_reorder_fairness;
-	double avg_before_reorder_fairness;
-	double avg_after_reorder_fairness;
+	double max_slowdown;
+	double min_slowdown;
+	double max_fairness;
+	double min_fairness;
+	double sum_fairness;
+	double avg_fairness;
 };
 
 struct nvmev_transaction_queue {
@@ -269,6 +270,8 @@ struct nvmev_transaction_queue {
 	unsigned int nr_trs_in_fly;
 	unsigned int nr_luns;
 	unsigned int nr_planes;
+	unsigned int channel;
+	unsigned int chip;
 	uint64_t nr_processed_trs;
 	uint64_t nr_exist_conflict_trs;
 	
@@ -292,6 +295,7 @@ struct nvmev_result_tsu {
 
 struct nvmev_zone_info{
 	uint32_t zid;
+	unsigned int idx;
 	unsigned int nr_transactions;
 	struct list_head* pos_head;
 	struct list_head* pos_tail;
@@ -304,7 +308,10 @@ struct nvmev_workload_local_info{
 	unsigned int chip;
 	unsigned int die;
 	unsigned int nr_transactions_in_die_queue;
+	unsigned int nr_enqueued_transactions;
+	unsigned int nr_zones;
 	double local_slowdown;
+	uint64_t completed_transactions_time;
 
 	struct list_head zone_infos;
 	struct list_head list;
@@ -321,7 +328,8 @@ struct nvmev_workload_global_info{
 
 struct nvmev_tsu {
 	struct nvmev_transaction_queue** chip_queue; /*chip queue*/
-	struct nvmev_process_queue* process_queue; /* receive transaction from queue for reorder */
+	struct nvmev_process_queue* process_queue_read; /* receive transaction from queue for reorder */
+	struct nvmev_process_queue* process_queue_write;
 	struct list_head ret_queue;
 	struct list_head workload_infos; /* global workload info */
 
